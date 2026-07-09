@@ -89,14 +89,32 @@ func main() {
 		fatalf("server start: %v", err)
 	}
 
+	var exitOnce sync.Once
+
+	// Spawned before the readiness wait so a signal-driven or failed boot can
+	// never slip between WaitReady and this watcher and let launch.Run open a
+	// window against a dead server.
+	//
+	// Signal-driven or failure-driven server exit: the client has no graceful
+	// stop (the stock client's own exit path is os.Exit too), so leave once
+	// the server is down.
+	go func() {
+		<-srv.Done()
+		exitOnce.Do(func() {
+			if err := srv.Err(); err != nil {
+				logger.Error("server exited", "err", err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		})
+	}()
+
 	readyCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	err = srv.WaitReady(readyCtx, *ondemandPort)
 	cancel()
 	if err != nil {
 		fatalf("server failed to become ready: %v", err)
 	}
-
-	var exitOnce sync.Once
 
 	// Window close / client shutdown: stop the server first (player saves +
 	// sqlite flush happen during service shutdown), then leave the process.
@@ -114,22 +132,8 @@ func main() {
 		select {}
 	}
 
-	// Signal-driven or failure-driven server exit: the client has no graceful
-	// stop (the stock client's own exit path is os.Exit too), so leave once
-	// the server is down.
-	go func() {
-		<-srv.Done()
-		exitOnce.Do(func() {
-			if err := srv.Err(); err != nil {
-				logger.Error("server exited", "err", err)
-				os.Exit(1)
-			}
-			os.Exit(0)
-		})
-	}()
-
 	launch.Run(launch.Options{
-		NodeID:          10,
+		NodeID:          10, // must match the server's world.node-id / ondemand.node-id defaults (both 10)
 		StoreID:         32,
 		LowMemory:       lowMemory,
 		Members:         members,

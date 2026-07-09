@@ -68,17 +68,22 @@ func (s *Server) WaitReady(ctx context.Context, ondemandPort int) error {
 	httpClient := &http.Client{Timeout: 2 * time.Second}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	lastProbe := "no probe completed"
 	for {
 		resp, err := httpClient.Get(url)
 		if err == nil {
-			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
+				resp.Body.Close()
 				return nil
 			}
+			lastProbe = fmt.Sprintf("status %d", resp.StatusCode)
+			resp.Body.Close()
+		} else {
+			lastProbe = err.Error()
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("server not ready before deadline (last probe of %s: %v): %w", url, err, ctx.Err())
+			return fmt.Errorf("server not ready before deadline (last probe of %s: %s): %w", url, lastProbe, ctx.Err())
 		case <-s.done:
 			return fmt.Errorf("server exited during startup: %w", s.err)
 		case <-ticker.C:
