@@ -88,12 +88,17 @@ faithful-to-Java policy:
    `pkg/jagex2/launch` — with an `Options` struct (node id, mem profile,
    members flag, store id, world host/transport/port, ondemand base URL).
    `cmd/client/main.go` becomes flag parsing plus one `launch.Run(opts)` call.
-   Stock client behavior is byte-identical.
+   Stock client behavior is byte-identical on the success path; the release
+   banner moves inside `launch.Run`, so a flag-validation failure now prints
+   only the error (previously banner then error). Accepted: flags are a
+   Go-original surface with no Java-parity impact.
 
 2. **Exit hook.** `(*Client).Shutdown` (`pkg/jagex2/client/gameshell.go:32`)
    and the post-`RunShell` exit call `os.Exit` directly. Replace with an
-   exported hook (`var ExitFunc = os.Exit` in the launch package, threaded to
-   both call sites). Default behavior unchanged.
+   exported hook (`var ExitFunc = os.Exit` in `clientextras` — package
+   `client` must reach it, so the launch package would be an import cycle;
+   `clientextras` is the designated cycle-breaker). Default behavior
+   unchanged.
 
 The singleplayer main calls `launch.Run` with loopback options and `ExitFunc`
 overridden to perform graceful server shutdown first.
