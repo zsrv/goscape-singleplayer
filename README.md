@@ -42,3 +42,7 @@ shuts the server down gracefully (saves flush) before the process exits.
 All listeners bind 127.0.0.1 only. Ports are adjustable if the defaults
 collide: `--world-port 43594 --ondemand-port 8080 --login-port 2004
 --friends-port 2005`.
+
+The client itself takes two pass-through flags: `--mem low` selects the
+client's low-memory mode and `--world-type free` a free-to-play world
+(defaults: `high`, `members`).

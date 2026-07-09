@@ -1247,3 +1247,14 @@ Add flag `--wordenc-path` (default `""` = derived next to the cache); pass
 through `server.Options.WordEncPath`; call `server.CheckWordEnc` on the
 resolved path (from `cfg.World.WordEncPath`) right after `server.CheckCache`;
 README usage mentions the wordenc file and the override flag.
+
+## Amendment 2 (2026-07-09, as-built): final-review fixes
+
+The whole-branch review found the plan's own Task 5 main.go ordering left a
+window where a shutdown signal between WaitReady and the watcher-goroutine
+spawn could open the client window against a dead server (violating the
+spec's lifecycle section). As built, exitOnce + the Done watcher are
+installed immediately after server.Start, before the readiness wait.
+Also: WaitReady's timeout message reports the last probe outcome as text
+(no more "<nil>"), README documents --mem/--world-type, spec's JAGGRAB
+phrasing clarified, node-id coupling commented.

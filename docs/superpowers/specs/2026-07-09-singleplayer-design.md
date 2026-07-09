@@ -16,7 +16,7 @@ character is where you left it.
 | Decision | Choice | Rationale |
 |---|---|---|
 | Repo strategy | Third repo `goscape-singleplayer` importing both modules | No history merge, no CGO pollution of the server repo, provenance policies stay separate |
-| Transport | Loopback TCP for everything | Zero transport changes in either repo; every client network path (game socket, ondemand-over-game-socket, HTTP cache, JAGGRAB fallback) works exactly as in multiplayer |
+| Transport | Loopback TCP for everything | Zero transport changes in either repo; every client network path (game socket, ondemand-over-game-socket, HTTP cache, JAGGRAB fallback dormant — goscape serves no port-43595 listener in any topology, and the fallback only triggers after HTTP cache-fetch failures) works exactly as in multiplayer |
 | Revisions | rev-274 first | Prove the shape once, then replicate per the established cross-rev methodology |
 | Login UX | Standard login screen | `login.auto-register` defaults to `true` (`modules/login/config.go:42`), so first login creates the account; zero client divergence |
 
