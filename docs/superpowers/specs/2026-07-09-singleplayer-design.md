@@ -54,7 +54,17 @@ checkouts to be on the matching revision branch.
 
 The binary needs `CGO_ENABLED=1` (GLFW/OpenGL via the client).
 
-## Server bootstrap (no goscape changes)
+## Server bootstrap (one goscape change — Amendment 1)
+
+**Amendment 1 (2026-07-09, user-approved):** Task 4's boot test surfaced that
+`encfilter.Load()` reads the chat word-filter from a hardcoded cwd-relative
+`data/raw/wordenc` (TS-faithful, `WordEnc.ts:35-37`), which breaks the
+embedded server outside the goscape checkout. Fix: goscape rev-274 gains an
+optional `world.wordenc_path` config knob whose default remains the
+TS-faithful hardcoded path (same pattern as `world.rsa_private_key_path`);
+the singleplayer bootstrap sets it absolute, defaulting to
+`<cache-dir>/../raw/wordenc` (goscape's repo layout) with a `--wordenc-path`
+override and a fail-fast existence check.
 
 `internal/server` builds `app.Config` programmatically — start from
 `app.NewDefaultConfig()` (`cmd/goscape/app/config.go:30`), then override:
@@ -131,6 +141,7 @@ make the exit path idempotent (close-then-signal must not double-stop).
 | `--world-port` | `43594` | world TCP listen port |
 | `--ondemand-port` | `8080` | ondemand HTTP listen port |
 | `--login-port` / `--friends-port` | `2004` / `2005` | internal gRPC ports |
+| `--wordenc-path` | derived: `<cache-dir>/../raw/wordenc` | raw wordenc jagfile for the chat filter (Amendment 1) |
 | `--mem` | `high` | client memory profile pass-through |
 | `--world-type` | `members` | client free/members pass-through |
 

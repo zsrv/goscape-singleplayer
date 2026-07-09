@@ -1193,3 +1193,57 @@ git commit --no-gpg-sign -m "feat: goscape-singleplayer binary — embedded serv
 - [ ] **Step 6: Hand off the windowed smoke test**
 
 The final verification is user-launched (windowed GUI): build, run against a real packed cache, log in with a fresh username, walk around, close the window, confirm the server-shutdown log lines appear, relaunch, log in again, confirm the character persisted. Report readiness for this handoff; do not attempt to drive the GUI.
+
+---
+
+## Amendment 1 (2026-07-09): wordenc path knob — user-approved
+
+Task 4's boot smoke test surfaced a real embedding defect: goscape's
+`encfilter.Load()` (`pkg/wordenc/encfilter/encfilter.go:60`) reads the chat
+word-filter jagfile from the hardcoded cwd-relative path `data/raw/wordenc`
+(TS-faithful, `WordEnc.ts:35-37`; consumed at `modules/world/server.go:717`),
+so `world.NewServer` fails when the singleplayer binary runs from any other
+directory. The user approved a goscape-side config knob. The "do not touch
+the goscape server repo" global constraint is lifted for exactly the Task 4a
+change below.
+
+### Task 4a (inserted before Task 4 resumes): goscape `world.wordenc_path`
+
+**Files (goscape repo, branch rev-274):**
+- Modify: `pkg/wordenc/encfilter/encfilter.go` — `func Load() (*Filter, error)`
+  becomes `func Load(path string) (*Filter, error)`; the body uses `path`
+  instead of the literal; doc comments updated to say the default path comes
+  from world config while keeping the TS reference.
+- Modify: `modules/world/config.go` — add field
+  `WordEncPath string  \`yaml:"wordenc_path"\`` with flag registration
+  `f.StringVar(&c.WordEncPath, "world.wordenc-path", "data/raw/wordenc", ...)`.
+  Doc comment: Go-original embedding knob (same pattern as
+  `rsa_private_key_path`); the default preserves the TS-faithful hardcoded
+  relative path, resolved against the process working directory as before.
+- Modify: `modules/world/server.go:717` — `encfilter.Load(cfg.WordEncPath)`.
+- Modify: `examples/full-config-reference.yaml` — document `wordenc_path`
+  at its default in the world section (the reference documents every option).
+- Tests: adapt existing callers/tests of `Load()` (e.g.
+  `modules/world/server_wordenc_test.go`, encfilter tests); add/extend a case
+  proving a custom absolute path loads without chdir.
+- Verify: `go build ./...` plus `go test ./pkg/wordenc/... ./modules/world/...`
+  in goscape; behavior with the default value must be unchanged.
+- Commit (goscape): `feat(world): configurable wordenc_path for embedders (default TS-faithful)`
+
+### Task 4 (amended)
+
+`internal/server/config.go`: `Options` gains `WordEncPath string` (empty ⇒
+derive `filepath.Join(cacheDir, "..", "raw", "wordenc")` after CacheDir is
+absolutized); `NewConfig` sets `cfg.World.WordEncPath` to the absolute path.
+Add `CheckWordEnc(path string) error` (os.Stat with an actionable message —
+the raw file sits next to the pack in goscape's layout; `--wordenc-path`
+overrides). Extend `config_test.go`: derived default, explicit override, and
+CheckWordEnc failure/success. `server.go`/`server_test.go` unchanged from the
+original task text.
+
+### Task 5 (amended)
+
+Add flag `--wordenc-path` (default `""` = derived next to the cache); pass
+through `server.Options.WordEncPath`; call `server.CheckWordEnc` on the
+resolved path (from `cfg.World.WordEncPath`) right after `server.CheckCache`;
+README usage mentions the wordenc file and the override flag.
