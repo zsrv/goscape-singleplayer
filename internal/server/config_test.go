@@ -81,6 +81,69 @@ func TestNewConfigWiresLoopbackStack(t *testing.T) {
 	}
 }
 
+// Amendment 1: the chat word-filter jagfile path must reach world config.
+// Empty Options.WordEncPath derives <cache-dir>/../raw/wordenc (goscape repo
+// layout: the raw file sits next to the pack).
+func TestNewConfigDerivesWordEncPathNextToCache(t *testing.T) {
+	cfg, err := NewConfig(Options{
+		DataDir:      "sp-data",
+		CacheDir:     "sp-pack",
+		WorldPort:    40594,
+		OndemandPort: 40080,
+		LoginPort:    42004,
+		FriendsPort:  42005,
+	})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	if !filepath.IsAbs(cfg.World.WordEncPath) {
+		t.Errorf("World.WordEncPath = %q, want absolute", cfg.World.WordEncPath)
+	}
+	if !strings.HasSuffix(cfg.World.WordEncPath, filepath.Join("raw", "wordenc")) {
+		t.Errorf("World.WordEncPath = %q, want …/raw/wordenc", cfg.World.WordEncPath)
+	}
+	// Derived path sits next to the cache dir: <cache-dir>/../raw/wordenc.
+	want := filepath.Join(filepath.Dir(cfg.World.CachePath), "raw", "wordenc")
+	if cfg.World.WordEncPath != want {
+		t.Errorf("World.WordEncPath = %q, want %q (next to cache dir)", cfg.World.WordEncPath, want)
+	}
+}
+
+func TestNewConfigWordEncPathOverride(t *testing.T) {
+	cfg, err := NewConfig(Options{
+		DataDir:      "sp-data",
+		CacheDir:     "sp-pack",
+		WordEncPath:  "custom/wordenc",
+		WorldPort:    40594,
+		OndemandPort: 40080,
+		LoginPort:    42004,
+		FriendsPort:  42005,
+	})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	if !filepath.IsAbs(cfg.World.WordEncPath) {
+		t.Errorf("World.WordEncPath = %q, want absolute", cfg.World.WordEncPath)
+	}
+	if !strings.HasSuffix(cfg.World.WordEncPath, filepath.Join("custom", "wordenc")) {
+		t.Errorf("World.WordEncPath = %q, want the override to propagate", cfg.World.WordEncPath)
+	}
+}
+
+func TestCheckWordEnc(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wordenc")
+	if err := CheckWordEnc(path); err == nil {
+		t.Fatal("CheckWordEnc on missing file: want error, got nil")
+	}
+	if err := os.WriteFile(path, []byte{0}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckWordEnc(path); err != nil {
+		t.Fatalf("CheckWordEnc with file present: %v", err)
+	}
+}
+
 func TestCheckCache(t *testing.T) {
 	dir := t.TempDir()
 	if err := CheckCache(dir); err == nil {
