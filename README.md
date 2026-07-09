@@ -16,3 +16,29 @@ Neither `goscape` nor `goscape-client` is fetchable as a Go module, so each
 revision branch uses `replace` directives pointing at sibling checkouts
 (`../goscape`, `../goscape-client`). Building a given revision requires those
 checkouts to have the matching revision branch checked out.
+
+## Usage (rev-274)
+
+Build (CGO required — GLFW/OpenGL):
+
+    CGO_ENABLED=1 go build -o goscape-singleplayer ./cmd/goscape-singleplayer
+
+You need a packed game cache. In the goscape repo, `make pack` produces one;
+point `--cache-dir` at its output (default `./data/pack`).
+
+    ./goscape-singleplayer --cache-dir ../goscape/data/pack
+
+The server also needs the raw `data/raw/wordenc` jagfile (chat word-filter).
+By default it is found next to the pack, at `<cache-dir>/../raw/wordenc` —
+this matches a goscape checkout's layout (`data/pack` and `data/raw/wordenc`
+are siblings under `data/`). Use `--wordenc-path` to override if your cache
+lives somewhere else.
+
+The world database and your character's saves live under `--data-dir`
+(default `./data`). Accounts auto-register: type any username/password at the
+login screen and the character is created on first login. Closing the window
+shuts the server down gracefully (saves flush) before the process exits.
+
+All listeners bind 127.0.0.1 only. Ports are adjustable if the defaults
+collide: `--world-port 43594 --ondemand-port 8080 --login-port 2004
+--friends-port 2005`.
