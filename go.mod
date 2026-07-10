@@ -64,6 +64,6 @@ require (
 )
 
 replace (
-	github.com/zsrv/goscape => ../goscape
-	github.com/zsrv/goscape-client => ../goscape-client
+	github.com/zsrv/goscape => ../goscape-rev225
+	github.com/zsrv/goscape-client => ../goscape-client-rev225
 )

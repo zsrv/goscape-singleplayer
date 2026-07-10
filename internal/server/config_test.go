@@ -81,78 +81,21 @@ func TestNewConfigWiresLoopbackStack(t *testing.T) {
 	}
 }
 
-// Amendment 1: the chat word-filter jagfile path must reach world config.
-// Empty Options.WordEncPath derives <cache-dir>/../raw/wordenc (goscape repo
-// layout: the raw file sits next to the pack).
-func TestNewConfigDerivesWordEncPathNextToCache(t *testing.T) {
-	cfg, err := NewConfig(Options{
-		DataDir:      "sp-data",
-		CacheDir:     "sp-pack",
-		WorldPort:    40594,
-		OndemandPort: 40080,
-		LoginPort:    42004,
-		FriendsPort:  42005,
-	})
-	if err != nil {
-		t.Fatalf("NewConfig: %v", err)
-	}
-	if !filepath.IsAbs(cfg.World.WordEncPath) {
-		t.Errorf("World.WordEncPath = %q, want absolute", cfg.World.WordEncPath)
-	}
-	if !strings.HasSuffix(cfg.World.WordEncPath, filepath.Join("raw", "wordenc")) {
-		t.Errorf("World.WordEncPath = %q, want …/raw/wordenc", cfg.World.WordEncPath)
-	}
-	// Derived path sits next to the cache dir: <cache-dir>/../raw/wordenc.
-	want := filepath.Join(filepath.Dir(cfg.World.CachePath), "raw", "wordenc")
-	if cfg.World.WordEncPath != want {
-		t.Errorf("World.WordEncPath = %q, want %q (next to cache dir)", cfg.World.WordEncPath, want)
-	}
-}
-
-func TestNewConfigWordEncPathOverride(t *testing.T) {
-	cfg, err := NewConfig(Options{
-		DataDir:      "sp-data",
-		CacheDir:     "sp-pack",
-		WordEncPath:  "custom/wordenc",
-		WorldPort:    40594,
-		OndemandPort: 40080,
-		LoginPort:    42004,
-		FriendsPort:  42005,
-	})
-	if err != nil {
-		t.Fatalf("NewConfig: %v", err)
-	}
-	if !filepath.IsAbs(cfg.World.WordEncPath) {
-		t.Errorf("World.WordEncPath = %q, want absolute", cfg.World.WordEncPath)
-	}
-	if !strings.HasSuffix(cfg.World.WordEncPath, filepath.Join("custom", "wordenc")) {
-		t.Errorf("World.WordEncPath = %q, want the override to propagate", cfg.World.WordEncPath)
-	}
-}
-
-func TestCheckWordEnc(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "wordenc")
-	if err := CheckWordEnc(path); err == nil {
-		t.Fatal("CheckWordEnc on missing file: want error, got nil")
-	}
-	if err := os.WriteFile(path, []byte{0}, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := CheckWordEnc(path); err != nil {
-		t.Fatalf("CheckWordEnc with file present: %v", err)
-	}
-}
-
+// rev-225 packs a split layout (client/ + server/ under the cache root); the
+// chat word-filter is loaded from inside the cache, so CheckCache probes for
+// the client/config jagfile instead of a monolithic main_file_cache.dat.
 func TestCheckCache(t *testing.T) {
 	dir := t.TempDir()
 	if err := CheckCache(dir); err == nil {
 		t.Fatal("CheckCache on empty dir: want error, got nil")
 	}
-	if err := os.WriteFile(filepath.Join(dir, "main_file_cache.dat"), []byte{0}, 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "client"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "client", "config"), []byte{0}, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := CheckCache(dir); err != nil {
-		t.Fatalf("CheckCache with dat file: %v", err)
+		t.Fatalf("CheckCache with client/config present: %v", err)
 	}
 }

@@ -17,22 +17,24 @@ revision branch uses `replace` directives pointing at sibling checkouts
 (`../goscape`, `../goscape-client`). Building a given revision requires those
 checkouts to have the matching revision branch checked out.
 
-## Usage (rev-274)
+## Usage (rev-225)
+
+This branch's `replace` targets are the `../goscape-rev225` and
+`../goscape-client-rev225` sibling worktrees — no branch-switching needed in
+either sibling, they're already parked on their rev-225 tips.
 
 Build (CGO required — GLFW/OpenGL):
 
     CGO_ENABLED=1 go build -o goscape-singleplayer ./cmd/goscape-singleplayer
 
-You need a packed game cache. In the goscape repo, `make pack` produces one;
-point `--cache-dir` at its output (default `./data/pack`).
+You need a packed game cache. In the goscape-rev225 repo, `make pack`
+produces one; point `--cache-dir` at its output (default `./data/pack`).
+rev-225 packs a split layout — `client/` and `server/` subdirectories under
+the cache root — and the chat word-filter (wordenc) is baked into the cache
+itself (`client/wordenc`), so there is no separate raw wordenc file to wire
+up and no `--wordenc-path` flag on this branch.
 
-    ./goscape-singleplayer --cache-dir ../goscape/data/pack
-
-The server also needs the raw `data/raw/wordenc` jagfile (chat word-filter).
-By default it is found next to the pack, at `<cache-dir>/../raw/wordenc` —
-this matches a goscape checkout's layout (`data/pack` and `data/raw/wordenc`
-are siblings under `data/`). Use `--wordenc-path` to override if your cache
-lives somewhere else.
+    ./goscape-singleplayer --cache-dir ../goscape-rev225/data/pack
 
 The world database and your character's saves live under `--data-dir`
 (default `./data`). Accounts auto-register: type any username/password at the

@@ -14,7 +14,6 @@ import (
 type Options struct {
 	DataDir      string // world database, player saves
 	CacheDir     string // packed game cache (goscape `make pack` output)
-	WordEncPath  string // raw wordenc jagfile for the chat filter; empty derives <cache-dir>/../raw/wordenc (goscape repo layout)
 	WorldPort    int    // game TCP port the client connects to
 	OndemandPort int    // cache/OnDemand HTTP port the client fetches from
 	LoginPort    int    // internal login gRPC port
@@ -33,14 +32,6 @@ func NewConfig(opts Options) (*app.Config, error) {
 	cacheDir, err := filepath.Abs(opts.CacheDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve cache dir: %w", err)
-	}
-	wordencPath := opts.WordEncPath
-	if wordencPath == "" {
-		wordencPath = filepath.Join(cacheDir, "..", "raw", "wordenc")
-	}
-	wordencPath, err = filepath.Abs(wordencPath)
-	if err != nil {
-		return nil, fmt.Errorf("resolve wordenc path: %w", err)
 	}
 
 	cfg := app.NewDefaultConfig()
@@ -61,7 +52,6 @@ func NewConfig(opts Options) (*app.Config, error) {
 	cfg.World.LoginServerAddress = fmt.Sprintf("127.0.0.1:%d", opts.LoginPort)
 	cfg.World.FriendsServerAddress = fmt.Sprintf("127.0.0.1:%d", opts.FriendsPort)
 	cfg.World.FriendsServerEnabled = true
-	cfg.World.WordEncPath = wordencPath
 
 	cfg.OnDemand.Enable = true
 	cfg.OnDemand.CachePath = cacheDir
@@ -79,22 +69,14 @@ func NewConfig(opts Options) (*app.Config, error) {
 
 // CheckCache fails fast with an actionable message when the packed cache is
 // missing — the expected first-run mistake. The repo ships no cache; goscape's
-// `make pack` produces one.
+// `make pack` produces one. rev-225 packs a split layout (client/ + server/
+// under the cache root); the chat word-filter is loaded from inside the
+// cache (client/wordenc), not a separate raw file.
 func CheckCache(cacheDir string) error {
-	if _, err := os.Stat(filepath.Join(cacheDir, "main_file_cache.dat")); err != nil {
-		return fmt.Errorf("no packed game cache at %s (main_file_cache.dat missing): "+
-			"run `make pack` in the goscape repo or point --cache-dir at an existing pack: %w",
+	if _, err := os.Stat(filepath.Join(cacheDir, "client", "config")); err != nil {
+		return fmt.Errorf("no packed rev-225 game cache at %s (client/config missing): "+
+			"point --cache-dir at a rev-225 split-layout pack (data/pack with client/ + server/): %w",
 			cacheDir, err)
-	}
-	return nil
-}
-
-// CheckWordEnc fails fast when the raw wordenc jagfile (chat word-filter)
-// is missing. In goscape's layout it sits next to the pack at
-// data/raw/wordenc; --wordenc-path overrides.
-func CheckWordEnc(path string) error {
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("no wordenc jagfile at %s: expected next to the packed cache (goscape data/raw/wordenc) or set --wordenc-path: %w", path, err)
 	}
 	return nil
 }

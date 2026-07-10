@@ -28,8 +28,7 @@ func fatalf(format string, args ...any) {
 
 func main() {
 	dataDir := flag.String("data-dir", "./data", "directory for the world database and player saves")
-	cacheDir := flag.String("cache-dir", "./data/pack", "packed game cache directory (goscape `make pack` output)")
-	wordencPath := flag.String("wordenc-path", "", "raw wordenc jagfile for the chat word-filter (default: <cache-dir>/../raw/wordenc)")
+	cacheDir := flag.String("cache-dir", "./data/pack", "packed game cache directory (goscape `make pack` output; rev-225 split layout: client/ + server/ under this path)")
 	worldPort := flag.Int("world-port", 43594, "loopback game (world) TCP port")
 	ondemandPort := flag.Int("ondemand-port", 8080, "loopback cache/OnDemand HTTP port")
 	loginPort := flag.Int("login-port", 2004, "loopback login gRPC port (internal)")
@@ -65,7 +64,6 @@ func main() {
 	cfg, err := server.NewConfig(server.Options{
 		DataDir:      *dataDir,
 		CacheDir:     *cacheDir,
-		WordEncPath:  *wordencPath,
 		WorldPort:    *worldPort,
 		OndemandPort: *ondemandPort,
 		LoginPort:    *loginPort,
@@ -73,10 +71,6 @@ func main() {
 	})
 	if err != nil {
 		fatalf("server config: %v", err)
-	}
-
-	if err := server.CheckWordEnc(cfg.World.WordEncPath); err != nil {
-		fatalf("%v", err)
 	}
 
 	logger, err := server.NewLogger()
@@ -134,7 +128,6 @@ func main() {
 
 	launch.Run(launch.Options{
 		NodeID:          10, // must match the server's world.node-id / ondemand.node-id defaults (both 10)
-		StoreID:         32,
 		LowMemory:       lowMemory,
 		Members:         members,
 		Host:            "127.0.0.1",

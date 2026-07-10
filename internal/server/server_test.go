@@ -10,12 +10,13 @@ import (
 
 // Boots the real module stack against a packed cache and verifies
 // ready→stop. Needs a cache: GOSCAPE_SP_TEST_CACHE overrides; default is the
-// sibling goscape checkout's pack output. Skips when absent so `go test ./...`
-// stays green on a fresh machine.
+// sibling goscape-rev225 checkout's pack output (split layout: client/ +
+// server/ under data/pack). Skips when absent so `go test ./...` stays green
+// on a fresh machine.
 func TestServerBootsReadyAndStops(t *testing.T) {
 	cacheDir := os.Getenv("GOSCAPE_SP_TEST_CACHE")
 	if cacheDir == "" {
-		cacheDir = "../../../goscape/data/pack"
+		cacheDir = "../../../goscape-rev225/data/pack"
 	}
 	if err := CheckCache(cacheDir); err != nil {
 		t.Skipf("packed cache unavailable: %v", err)
