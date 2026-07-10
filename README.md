@@ -17,16 +17,20 @@ revision branch uses `replace` directives pointing at sibling checkouts
 (`../goscape`, `../goscape-client`). Building a given revision requires those
 checkouts to have the matching revision branch checked out.
 
-## Usage (rev-274)
+## Usage (rev-245.2)
+
+This branch's `replace` targets are the `../goscape-rev245.2` and
+`../goscape-client-rev245.2` sibling worktrees — no branch-switching needed in
+either sibling, they're already parked on their rev-245.2 tips.
 
 Build (CGO required — GLFW/OpenGL):
 
     CGO_ENABLED=1 go build -o goscape-singleplayer ./cmd/goscape-singleplayer
 
-You need a packed game cache. In the goscape repo, `make pack` produces one;
-point `--cache-dir` at its output (default `./data/pack`).
+You need a packed game cache. In the goscape-rev245.2 repo, `make pack`
+produces one; point `--cache-dir` at its output (default `./data/pack`).
 
-    ./goscape-singleplayer --cache-dir ../goscape/data/pack
+    ./goscape-singleplayer --cache-dir ../goscape-rev245.2/data/pack
 
 The server also needs the raw `data/raw/wordenc` jagfile (chat word-filter).
 By default it is found next to the pack, at `<cache-dir>/../raw/wordenc` —
