@@ -19,6 +19,7 @@ import (
 	"github.com/zsrv/goscape-client/pkg/jagex2/client/clientextras"
 	"github.com/zsrv/goscape-client/pkg/jagex2/launch"
 	"github.com/zsrv/goscape-singleplayer/internal/build"
+	"github.com/zsrv/goscape-singleplayer/internal/content"
 	"github.com/zsrv/goscape-singleplayer/internal/server"
 )
 
@@ -42,6 +43,7 @@ func main() {
 
 	if *showVersion {
 		fmt.Println(build.Info())
+		fmt.Println(content.Info())
 		return
 	}
 
@@ -65,13 +67,27 @@ func main() {
 		fatalf("invalid -world-type %q (want free|members)", *worldType)
 	}
 
-	if err := server.CheckCache(*cacheDir); err != nil {
+	explicitCacheDir := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "cache-dir" {
+			explicitCacheDir = true
+		}
+	})
+
+	bundle, _ := content.Bundle()
+	resolvedCacheDir, resolveErr := content.ResolveCacheDir(
+		explicitCacheDir, *cacheDir, *dataDir, bundle, content.PackDigest)
+	if resolveErr != nil {
+		fatalf("content: %v", resolveErr)
+	}
+
+	if err := server.CheckCache(resolvedCacheDir); err != nil {
 		fatalf("%v", err)
 	}
 
 	cfg, err := server.NewConfig(server.Options{
 		DataDir:      *dataDir,
-		CacheDir:     *cacheDir,
+		CacheDir:     resolvedCacheDir,
 		WordEncPath:  *wordencPath,
 		WorldPort:    *worldPort,
 		OndemandPort: *ondemandPort,
