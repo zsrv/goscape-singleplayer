@@ -562,35 +562,48 @@ func EnsureExtracted(src fs.FS, dir, digest string) error {
 	return nil
 }
 
-// staleAfter is how long a foreign temp or aside directory must have gone
-// untouched before this process will treat it as debris rather than as a live
-// peer's work. Extracting the real bundle takes seconds, so an hour is
-// generous. See removeStale for why the margin has to exist at all.
-const staleAfter = time.Hour
+// staleForeignThreshold is how old a foreign process's tmp/old directory's
+// modification time must be before removeStale treats it as debris from a
+// crashed run rather than a live peer's in-flight extraction. Extracting the
+// real ~39 MB bundle takes seconds, so an hour is generous headroom.
+const staleForeignThreshold = time.Hour
 
 // removeStale clears temp and aside directories left by a crashed run.
 //
-// The sweep is deliberately NOT unconditional. A directory belonging to
-// another pid is, by name alone, indistinguishable from a live peer's
-// in-flight extraction — and deleting one silently corrupts it rather than
-// failing loudly, because writeTree's per-entry os.MkdirAll recreates the
-// structure underneath the victim, which then stamps a partial tree as
-// complete. So: always clear our own pid's leftovers, and clear a foreign one
-// only once it is provably not in flight. A directory we cannot stat is left
-// alone rather than guessed at.
-func removeStale(parent, base string) error {
-	ours := fmt.Sprintf("-%d", os.Getpid())
+// ownTmp and ownOld — this process's own pid-suffixed directories — are
+// always removed; no other process can be using them. A directory belonging
+// to another pid is removed only when its modification time is older than
+// staleForeignThreshold, since a live peer's in-flight extraction leaves an
+// identically-shaped directory that must not be deleted out from under it.
+// If the directory can't be stat'd, it is left alone rather than guessed at.
+//
+// Note the own-directory test is exact path equality, not a suffix match:
+// suffix matching would let pid 123 claim pid 4123's live directory unless the
+// separator were folded into the comparison. Equality on fully-qualified paths
+// cannot make that mistake at all.
+func removeStale(parent, base, ownTmp, ownOld string) error {
+	if err := os.RemoveAll(ownTmp); err != nil {
+		return fmt.Errorf("content: remove own stale %s: %w", ownTmp, err)
+	}
+	if err := os.RemoveAll(ownOld); err != nil {
+		return fmt.Errorf("content: remove own stale %s: %w", ownOld, err)
+	}
+
 	for _, pattern := range []string{base + ".tmp-*", base + ".old-*"} {
 		matches, err := filepath.Glob(filepath.Join(parent, pattern))
 		if err != nil {
 			return fmt.Errorf("content: scan for stale %s: %w", pattern, err)
 		}
 		for _, m := range matches {
-			if !strings.HasSuffix(m, ours) {
-				info, statErr := os.Stat(m)
-				if statErr != nil || time.Since(info.ModTime()) < staleAfter {
-					continue
-				}
+			if m == ownTmp || m == ownOld {
+				continue
+			}
+			info, err := os.Stat(m)
+			if err != nil {
+				continue // can't confirm it's not in flight; leave it alone
+			}
+			if time.Since(info.ModTime()) < staleForeignThreshold {
+				continue // recent enough that a live peer may still be writing it
 			}
 			if err := os.RemoveAll(m); err != nil {
 				return fmt.Errorf("content: remove stale %s: %w", m, err)
