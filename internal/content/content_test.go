@@ -1,3 +1,5 @@
+//go:build !embedcache
+
 package content
 
 import (

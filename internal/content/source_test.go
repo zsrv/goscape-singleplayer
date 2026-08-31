@@ -1,4 +1,6 @@
 // internal/content/source_test.go
+//go:build !embedcache
+
 package content
 
 import "testing"
