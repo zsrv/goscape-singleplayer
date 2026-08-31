@@ -184,8 +184,19 @@ Extraction is idempotent and stamp-guarded:
   a complete one, since a temp tree without a stamp is never promoted. The
   rename makes the swap atomic within a filesystem.
 - Two instances starting concurrently each extract to their own pid-suffixed
-  temp directory and race on the rename. Both orderings leave a complete,
-  identically-contented `content/`, so no locking is needed.
+  temp directory and race on the install rename. **They do not both succeed at
+  renaming** — on a cold first run both find no `content/`, both write their
+  temp tree, and the loser's install fails with `EEXIST`/`ENOTEMPTY`. The loser
+  therefore re-reads `content/.content-stamp` after a failed install: if it now
+  matches the digest, the winner has installed a complete tree and the loser
+  removes its temp directory and reports success. Only a mismatched stamp is an
+  error. Still no locking, but the guarantee is "the loser observes the winner's
+  result", not "both renames succeed".
+
+  A stamp can only appear in `content/` after the top-of-function check by way
+  of a peer's atomic install, and the stamp is written last inside the temp
+  tree — so a matching stamp implies a complete tree, and the early return
+  cannot mask a genuine failure.
 - Any leftover `content.tmp-*` or `content.old-*` directories from a crashed run
   are swept at the start of the next extraction. They are the only way this
   scheme can accumulate anything. **The sweep must not be unconditional.** A
@@ -200,10 +211,12 @@ Extraction is idempotent and stamp-guarded:
   extraction of the real bundle takes seconds; the threshold is an hour). If
   the stat fails, the directory is left alone rather than guessed at.
 
-  This ordering matters: the concurrency guarantee above is a property of the
-  pid-suffixed temp directories plus atomic rename *alone*. The sweep is the
-  only thing that can falsify it, which is why it is constrained rather than
-  the guarantee weakened.
+  This ordering matters: the concurrency guarantee above rests on the
+  pid-suffixed temp directories, the atomic rename, and the loser's stamp
+  re-read. The sweep is the one thing that can falsify it — deleting a live
+  peer's in-flight tree lets the victim silently recreate and stamp a partial
+  one — which is why the sweep is constrained rather than the guarantee
+  weakened.
 - An upgraded binary carries a different digest and re-extracts automatically,
   with no user action and no stale-cache failure mode.
 

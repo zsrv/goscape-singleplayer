@@ -510,8 +510,12 @@ const StampName = ".content-stamp"
 // no cache at all if the second rename failed.
 //
 // Concurrent callers each extract into their own pid-suffixed temp directory
-// and race on the rename. Both orderings leave a complete, identically
-// contented dir, so no locking is needed.
+// and race on the install rename. They do not both succeed: on a cold start
+// both find no dir, and the loser's install fails with EEXIST/ENOTEMPTY. The
+// loser then re-reads the stamp — if it matches, the winner installed a
+// complete tree, so the loser removes its temp dir and reports success. Only a
+// mismatched stamp is an error. No locking, but the guarantee is that the
+// loser observes the winner's result, not that both renames succeed.
 func EnsureExtracted(src fs.FS, dir, digest string) error {
 	if digest == "" {
 		return errors.New("content: refusing to extract without a pack digest (binary was not stamped at build time)")
