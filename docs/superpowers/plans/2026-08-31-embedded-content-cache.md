@@ -1425,15 +1425,39 @@ record of why the shipped content moved. Do not bump the pin and change code
 in the same commit.
 ```
 
-- [ ] **Step 4: Verify the docs are honest**
+- [ ] **Step 4: Sweep the README for every restatement of the old claim**
 
-Run: `grep -n "distributes no Jagex" NOTICE`
-Expected: no output. The old claim must be gone.
+The claim appears in the README **three times, in three different wordings**,
+and a grep for the original phrase finds only the first. On rev-274 they were:
+
+| Section | Wording |
+|---|---|
+| `## License` | "including the note that no Jagex assets are distributed here" |
+| `## Requirements` | "This repository ships no game assets." |
+| `## The game cache` | "You supply your own." |
+
+Each contradicts the new Downloads section. Scope every one of them to the
+build-from-source case and point at Downloads for the alternative — e.g. the
+Requirements bullet becomes "A packed revision N game cache, **when building
+from source** (see below). Release binaries carry one already — see
+[Downloads](#downloads)."
+
+Then read the whole README end to end asking only: *does any remaining
+sentence imply a reader must supply their own game content, without saying
+that applies to source builds?* Do not rely on grep for this step — the whole
+point is that the restatements share no common phrase.
+
+- [ ] **Step 5: Verify the docs are honest**
+
+Run: `grep -rn "ships no game assets\|distributes no Jagex\|no Jagex assets are distributed" README.md NOTICE CONTRIBUTING.md`
+Expected: no output. Note this grep is a backstop, not the check — Step 4's
+read-through is the check, because a fourth restatement would not match any of
+these patterns either.
 
 Run: `grep -c "content.lock" CONTRIBUTING.md README.md`
 Expected: at least one hit in CONTRIBUTING.md.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add NOTICE README.md CONTRIBUTING.md
