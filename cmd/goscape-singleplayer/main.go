@@ -18,6 +18,7 @@ import (
 
 	"github.com/zsrv/goscape-client/pkg/jagex2/client/clientextras"
 	"github.com/zsrv/goscape-client/pkg/jagex2/launch"
+	"github.com/zsrv/goscape-singleplayer/internal/build"
 	"github.com/zsrv/goscape-singleplayer/internal/server"
 )
 
@@ -36,7 +37,13 @@ func main() {
 	friendsPort := flag.Int("friends-port", 2005, "loopback friends gRPC port (internal)")
 	mem := flag.String("mem", "high", "client memory mode: high|low")
 	worldType := flag.String("world-type", "members", "world type: free|members")
+	showVersion := flag.Bool("version", false, "print build and content provenance, then exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(build.Info())
+		return
+	}
 
 	var lowMemory bool
 	switch *mem {
