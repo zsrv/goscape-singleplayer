@@ -1495,8 +1495,10 @@ on:
   push:
     tags: ['rev*-v*']
 
+# Least privilege: only the release job needs write. gate/pack/build run
+# read-only.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   # A tag that fails the normal gate never reaches the build matrix.
@@ -1642,16 +1644,54 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      # `pattern` is load-bearing. download-artifact with no name/pattern
+      # downloads EVERY artifact in the run, which would drag the pack job's
+      # `bundle` (the whole content cache) into dist/ beside the archives.
+      # Every target name contains a hyphen; `bundle` does not.
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: '*-*'
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
+      # Assert dist/ holds exactly the five expected archives and nothing
+      # else, BEFORE publishing. This must hold on its own rather than
+      # trusting the pattern above — two independent checks of one property.
+      # Counting only regular files would pass a dist/ polluted with leaked
+      # directories, which is precisely the failure being guarded against.
+      - name: Verify the release payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=$(find dist -mindepth 1 -maxdepth 1 | wc -l)
+          if [ "$count" -ne 5 ]; then
+            echo "expected exactly 5 entries in dist/, found $count:" >&2
+            find dist -mindepth 1 -maxdepth 1 >&2
+            exit 1
+          fi
+          nonfiles=$(find dist -mindepth 1 -maxdepth 1 -not -type f)
+          if [ -n "$nonfiles" ]; then
+            echo "dist/ must contain only regular files, found:" >&2
+            echo "$nonfiles" >&2
+            exit 1
+          fi
+
+      # The preinstalled gh CLI rather than a third-party action: this job
+      # holds contents: write, and a mutable @v2 tag would let its owner run
+      # code here on every release. GH_REPO is required — gh resolves the repo
+      # from a git remote or GH_REPO, and does NOT fall back to
+      # GITHUB_REPOSITORY, so with no checkout it would otherwise fail with
+      # "unable to determine current repository".
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ github.ref_name }}
+        run: gh release create "$VERSION" dist/* --generate-notes
 ```
 
 - [ ] **Step 2: Validate the workflow parses**
