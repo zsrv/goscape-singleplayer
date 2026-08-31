@@ -1,0 +1,51 @@
+name: go
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: ['rev-*']
+  pull_request:
+    branches: ['rev-*']
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # This binary links the client, so CGO is mandatory: go-gl/glfw and
+      # go-gl/gl need X11 and GL headers at COMPILE time, and oto needs ALSA.
+      # Even `go vet` has to build the package. The list mirrors
+      # goscape-client's .devcontainer/apt-packages.txt, which is the
+      # authoritative source for this dependency set.
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc pkg-config libffi-dev \
+            libgl-dev libgles-dev libegl-dev \
+            libx11-dev libx11-xcb-dev libxkbcommon-x11-dev \
+            libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev \
+            libxxf86vm-dev \
+            libasound2-dev
+
+      - name: Build
+        run: CGO_ENABLED=1 go build -trimpath ./...
+
+      - name: Test
+        run: CGO_ENABLED=1 go test ./...
+
+      # The client is only ever built here, never run: there is no display and
+      # no game cache on the runner.
+      - name: Format and vet
+        run: test -z "$(gofmt -l .)" && CGO_ENABLED=1 go vet ./...
