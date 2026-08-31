@@ -1449,8 +1449,11 @@ jobs:
           repo=$(sed -n 's/^repo[[:space:]]*=[[:space:]]*//p' content.lock)
           cbranch=$(sed -n 's/^branch[[:space:]]*=[[:space:]]*//p' content.lock)
           commit=$(sed -n 's/^commit[[:space:]]*=[[:space:]]*//p' content.lock)
+          # An `[ ... ] && x=y` one-liner would abort the step under set -e on
+          # every non-Windows runner, because the false test makes the list
+          # return 1. Use an explicit if.
           bin=goscape-singleplayer
-          [ "$RUNNER_OS" = Windows ] && bin=goscape-singleplayer.exe
+          if [ "$RUNNER_OS" = Windows ]; then bin=goscape-singleplayer.exe; fi
           CGO_ENABLED=1 go build -trimpath -tags embedcache \
             -ldflags "-s -w \
               -X $B.Version=$VERSION \
@@ -1469,7 +1472,7 @@ jobs:
         run: |
           set -euo pipefail
           bin=./goscape-singleplayer
-          [ "$RUNNER_OS" = Windows ] && bin=./goscape-singleplayer.exe
+          if [ "$RUNNER_OS" = Windows ]; then bin=./goscape-singleplayer.exe; fi
           out=$("$bin" -version)
           echo "$out"
           echo "$out" | grep -q "embedded:  yes"
