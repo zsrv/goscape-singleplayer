@@ -1,0 +1,39 @@
+goscape-singleplayer — third-party notices and attribution
+==========================================================
+
+goscape-singleplayer contains no ported game code of its own. It is a launcher:
+it links the goscape server and the goscape-client game client into a single
+process and wires them together over loopback TCP. Everything it runs is
+attributed in those two projects' own NOTICE files, which travel with the
+modules this binary depends on.
+
+-----------------------------------------------------------------------
+goscape — the server
+-----------------------------------------------------------------------
+
+https://github.com/zsrv/goscape, MIT-licensed. A from-scratch Go rewrite of the
+Lost City TypeScript RuneScape server (https://github.com/LostCityRS/Engine-TS,
+MIT). Its NOTICE additionally covers the pkg/dskit port of Grafana's
+Apache-2.0 dskit and its build scaffolding:
+
+    https://github.com/zsrv/goscape/blob/main/NOTICE
+
+-----------------------------------------------------------------------
+goscape-client — the game client
+-----------------------------------------------------------------------
+
+https://github.com/zsrv/goscape-client, MIT-licensed. A Go port of the
+RuneScape 2 client, translated from the Lost City project's Client-Java and
+Client-TS (https://github.com/LostCityRS). See its NOTICE for the full
+attribution, including the Client-TS license text:
+
+    https://github.com/zsrv/goscape-client/blob/main/NOTICE
+
+-----------------------------------------------------------------------
+Jagex
+-----------------------------------------------------------------------
+
+The original RuneScape client and server are the intellectual property of
+Jagex Ltd. This project is an unofficial, fan-made preservation and study
+effort. It is not affiliated with or endorsed by Jagex, and it distributes no
+Jagex game assets or content — you supply your own packed cache.
