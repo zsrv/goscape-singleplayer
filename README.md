@@ -13,6 +13,26 @@ This branch targets **wire-protocol revision 274** and is pinned to the
 project overview, see the
 [`main` branch README](https://github.com/zsrv/goscape-singleplayer/blob/main/README.md).
 
+## Downloads
+
+Released binaries for this revision embed the game content — download one,
+run it, and you are at the login screen. No cache to build, no goscape
+checkout, nothing else to install.
+
+    ./goscape-singleplayer
+
+The content is extracted once to `<data-dir>/content/` on first run; later
+starts reuse it. To see which Content revision a binary carries:
+
+    ./goscape-singleplayer -version
+
+To ignore the embedded content and use a cache you packed yourself, pass
+`--cache-dir` — it always wins over the embedded copy.
+
+**Building from source embeds nothing.** A plain `go build` produces a binary
+that needs `--cache-dir`, exactly as described below. Embedding is opt-in via
+`make embed-pack && make build-embedded`.
+
 ## Requirements
 
 - Go 1.26 or newer
@@ -103,4 +123,4 @@ against local checkouts of both projects.
 
 MIT — see [LICENSE](LICENSE). This launcher combines two MIT-licensed projects
 derived from Lost City's work; [`NOTICE`](NOTICE) carries the attribution,
-including the note that no Jagex assets are distributed here.
+including the Jagex notice covering the game content release binaries embed.

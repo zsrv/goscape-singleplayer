@@ -68,6 +68,26 @@ replace (
 
 Push the upstream commits, then land the SHA pin here instead.
 
+### The content pin
+
+`content.lock` names the exact `LostCityRS/Content` commit whose game data
+release binaries embed. It is pinned, not tracked, so a given tag always
+builds the same content and the stamped provenance is known before the build
+runs.
+
+To move to newer content:
+
+```bash
+git -C /path/to/Content fetch origin 274
+git -C /path/to/Content rev-parse origin/274      # the new commit
+$EDITOR content.lock                              # update commit =
+make embed-pack && make build-embedded            # verify it packs and builds
+```
+
+Say in the commit message what changed upstream — the pin bump is the only
+record of why the shipped content moved. Do not bump the pin and change code
+in the same commit.
+
 ## Development
 
 Requirements: Go 1.26 or newer, and **CGO** — the client links GLFW, OpenGL and

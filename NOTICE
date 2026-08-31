@@ -30,10 +30,52 @@ attribution, including the Client-TS license text:
     https://github.com/zsrv/goscape-client/blob/main/NOTICE
 
 -----------------------------------------------------------------------
+Lost City — Content
+-----------------------------------------------------------------------
+
+Release binaries of goscape-singleplayer embed a game cache compiled from
+the Lost City Content repository (https://github.com/LostCityRS/Content) at
+the revision pinned in this branch's content.lock. Content is licensed under
+the MIT License:
+
+MIT License
+
+Copyright (c) 2023-2026 Lost City
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-----------------------------------------------------------------------
 Jagex
 -----------------------------------------------------------------------
 
 The original RuneScape client and server are the intellectual property of
 Jagex Ltd. This project is an unofficial, fan-made preservation and study
-effort. It is not affiliated with or endorsed by Jagex, and it distributes no
-Jagex game assets or content — you supply your own packed cache.
+effort. It is not affiliated with or endorsed by Jagex, and it is not
+authorised by Jagex.
+
+Two build modes differ in what they contain, and the distinction matters:
+
+- A build from source embeds no game content. It requires you to supply your
+  own packed cache via --cache-dir, exactly as before.
+- A release binary embeds a game cache compiled from the Lost City Content
+  repository named above. That cache describes RuneScape game data, and the
+  underlying game design and assets remain the property of Jagex Ltd.
+
+Run `goscape-singleplayer -version` to see exactly which Content revision a
+given binary carries, or whether it carries any at all.
