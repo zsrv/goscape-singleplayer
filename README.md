@@ -35,7 +35,7 @@ that needs `--cache-dir`, exactly as described below. Embedding is opt-in via
 
 ## Requirements
 
-- Go 1.26 or newer
+- Go 1.27 or newer
 - **CGO** — the client links GLFW, OpenGL and ALSA. On Debian or Ubuntu, the
   system packages are the ones in
   [goscape-client's `apt-packages.txt`](https://github.com/zsrv/goscape-client/blob/main/.devcontainer/apt-packages.txt).
