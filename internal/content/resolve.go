@@ -18,8 +18,8 @@ import (
 // Extracting to <dataDir>/content is what keeps main's wordenc default
 // working untouched: with the cache at <dataDir>/content/pack, the existing
 // <cache-dir>/../raw/wordenc derivation lands on <dataDir>/content/raw/wordenc.
-func ResolveCacheDir(explicit bool, cacheDir, dataDir string, bundle fs.FS, digest string) (string, error) {
-	if explicit || bundle == nil {
+func ResolveCacheDir(explicit bool, cacheDir, dataDir string, bundle fs.FS, haveBundle bool, digest string) (string, error) {
+	if explicit || !haveBundle {
 		return cacheDir, nil
 	}
 	if entries, err := fs.ReadDir(bundle, "."); err != nil || len(entries) == 0 {

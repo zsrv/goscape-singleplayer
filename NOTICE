@@ -35,8 +35,10 @@ Lost City — Content
 
 Release binaries of goscape-singleplayer embed a game cache compiled from
 the Lost City Content repository (https://github.com/LostCityRS/Content) at
-the revision pinned in this branch's content.lock. Content is licensed under
-the MIT License:
+the revision pinned in this branch's content.lock, together with the
+pre-built wordenc jagfile that goscape carries in data/raw/, itself sourced
+from Lost City's Engine-TS (https://github.com/LostCityRS/Engine-TS). Both
+are MIT-licensed by Lost City:
 
 MIT License
 

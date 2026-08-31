@@ -162,16 +162,31 @@ func TestEnsureExtractedRejectsEmptyDigest(t *testing.T) {
 	}
 }
 
+// TestEnsureExtractedIsFastOnWarmStart proves the warm-start property that
+// motivates the stamp check: a matching stamp makes EnsureExtracted return
+// before doing any filesystem writes, rather than merely finishing quickly
+// (a wall-clock assertion would flake on a loaded CI runner without actually
+// testing the property). The install path always ends by renaming a new
+// directory into place, which changes dir's identity even though the path
+// stays the same, so comparing the directory's identity — not just its
+// path — before and after is what proves no install happened.
 func TestEnsureExtractedIsFastOnWarmStart(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "content")
 	if err := EnsureExtracted(testBundle(), dir, "digest-1"); err != nil {
 		t.Fatalf("first extract: %v", err)
 	}
-	start := time.Now()
+	before, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := EnsureExtracted(testBundle(), dir, "digest-1"); err != nil {
 		t.Fatalf("warm extract: %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
-		t.Errorf("warm start took %v; the stamp compare should be near-instant", elapsed)
+	after, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Error("warm start replaced dir via rename; a matching stamp must return immediately with no filesystem writes")
 	}
 }

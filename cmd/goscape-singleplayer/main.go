@@ -74,11 +74,11 @@ func main() {
 		}
 	})
 
-	bundle, _ := content.Bundle()
+	bundle, haveBundle := content.Bundle()
 	resolvedCacheDir, resolveErr := content.ResolveCacheDir(
-		explicitCacheDir, *cacheDir, *dataDir, bundle, content.PackDigest)
+		explicitCacheDir, *cacheDir, *dataDir, bundle, haveBundle, content.PackDigest)
 	if resolveErr != nil {
-		fatalf("content: %v", resolveErr)
+		fatalf("%v", resolveErr)
 	}
 
 	if err := server.CheckCache(resolvedCacheDir); err != nil {

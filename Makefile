@@ -37,7 +37,12 @@ LDFLAGS = -s -w \
     -X $(BPREFIX).Revision=$(GIT_REVISION) \
     -X $(BPREFIX).Branch=$(GIT_BRANCH) \
     -X $(BPREFIX).BuildUser=$(shell whoami)@$(shell hostname) \
-    -X $(BPREFIX).BuildDate=$(BUILD_DATE) \
+    -X $(BPREFIX).BuildDate=$(BUILD_DATE)
+
+# Content provenance is stamped only into embedded builds: a plain `make
+# build` binary carries no content, so its -version output must not claim a
+# repo/branch/commit it doesn't have.
+CONTENT_LDFLAGS = \
     -X $(CPREFIX).Repo=$(CONTENT_REPO) \
     -X $(CPREFIX).Branch=$(CONTENT_BRANCH) \
     -X $(CPREFIX).Commit=$(CONTENT_COMMIT)
@@ -53,7 +58,7 @@ build: ## build without embedded content (the default; needs --cache-dir at runt
 build-embedded: ## build with the bundle in $(BUNDLE_DIR) embedded
 	@test -f $(MARKER) || { echo "no complete bundle at $(BUNDLE_DIR); run 'make embed-pack' first" >&2; exit 1; }
 	CGO_ENABLED=1 go build -trimpath -tags embedcache \
-	    -ldflags "$(LDFLAGS) -X $(CPREFIX).PackDigest=$(PACK_DIGEST)" -o $(BIN) $(CMD)
+	    -ldflags "$(LDFLAGS) $(CONTENT_LDFLAGS) -X $(CPREFIX).PackDigest=$(PACK_DIGEST)" -o $(BIN) $(CMD)
 
 embed-pack: ## pack the pinned Content revision into $(BUNDLE_DIR)
 	@test -n "$(CONTENT_COMMIT)" || { echo "content.lock: no commit pinned" >&2; exit 1; }

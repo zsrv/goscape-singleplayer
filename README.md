@@ -90,6 +90,7 @@ exits.
 | `--friends-port` | `2005` | internal friends gRPC port |
 | `--mem` | `high` | client memory mode: `high` or `low` |
 | `--world-type` | `members` | `members` or `free` |
+| `--version` | | print build and content provenance, then exit |
 
 The port flags exist for collisions only. **Every listener binds `127.0.0.1`
 and there is no flag to change that** — see [`SECURITY.md`](SECURITY.md) for

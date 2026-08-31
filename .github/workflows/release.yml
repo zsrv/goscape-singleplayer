@@ -84,6 +84,25 @@ jobs:
           name: bundle
           path: internal/content/embedded/bundle
 
+      # PackDigest doubles as the runtime extraction stamp, so a bundle that
+      # landed corrupted or partial must never be stamped with the digest the
+      # pack job computed over the original. Recompute it here, over what
+      # actually downloaded, and fail before it can be baked into a binary.
+      - name: Verify the downloaded bundle matches its digest
+        shell: bash
+        env:
+          DIGEST: ${{ needs.pack.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cd internal/content/embedded/bundle
+          d=$(find . -type f -print0 | LC_ALL=C sort -z \
+              | xargs -0 shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+          got="sha256:$d"
+          if [ "$got" != "$DIGEST" ]; then
+            echo "downloaded bundle digest mismatch: got $got, want $DIGEST" >&2
+            exit 1
+          fi
+
       # The tag is checked out detached, so Branch is derived from the tag's
       # rev prefix (rev274-v1.0.0 -> rev-274). Untrusted input reaches the
       # script through env, never string interpolation.

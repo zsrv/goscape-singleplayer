@@ -9,7 +9,7 @@ import (
 
 func TestResolveCacheDirExplicitFlagWins(t *testing.T) {
 	data := t.TempDir()
-	got, err := ResolveCacheDir(true, "/somewhere/pack", data, testBundle(), "digest-1")
+	got, err := ResolveCacheDir(true, "/somewhere/pack", data, testBundle(), true, "digest-1")
 	if err != nil {
 		t.Fatalf("ResolveCacheDir: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestResolveCacheDirExplicitFlagWins(t *testing.T) {
 
 func TestResolveCacheDirExtractsBundle(t *testing.T) {
 	data := t.TempDir()
-	got, err := ResolveCacheDir(false, "./data/pack", data, testBundle(), "digest-1")
+	got, err := ResolveCacheDir(false, "./data/pack", data, testBundle(), true, "digest-1")
 	if err != nil {
 		t.Fatalf("ResolveCacheDir: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestResolveCacheDirExtractsBundle(t *testing.T) {
 // Extraction must place the bundle so that derivation resolves untouched.
 func TestResolveCacheDirSatisfiesWordEncDefault(t *testing.T) {
 	data := t.TempDir()
-	cacheDir, err := ResolveCacheDir(false, "./data/pack", data, testBundle(), "digest-1")
+	cacheDir, err := ResolveCacheDir(false, "./data/pack", data, testBundle(), true, "digest-1")
 	if err != nil {
 		t.Fatalf("ResolveCacheDir: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestResolveCacheDirSatisfiesWordEncDefault(t *testing.T) {
 }
 
 func TestResolveCacheDirNoBundleFallsBackToFlag(t *testing.T) {
-	got, err := ResolveCacheDir(false, "./data/pack", t.TempDir(), nil, "")
+	got, err := ResolveCacheDir(false, "./data/pack", t.TempDir(), nil, false, "")
 	if err != nil {
 		t.Fatalf("ResolveCacheDir: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestResolveCacheDirNoBundleFallsBackToFlag(t *testing.T) {
 }
 
 func TestResolveCacheDirEmptyBundleIsNotABundle(t *testing.T) {
-	got, err := ResolveCacheDir(false, "./data/pack", t.TempDir(), fstest.MapFS{}, "digest-1")
+	got, err := ResolveCacheDir(false, "./data/pack", t.TempDir(), fstest.MapFS{}, true, "digest-1")
 	if err != nil {
 		t.Fatalf("ResolveCacheDir: %v", err)
 	}

@@ -31,9 +31,15 @@ const staleForeignThreshold = time.Hour
 // no cache at all if the second rename failed.
 //
 // Concurrent callers each extract into their own pid-suffixed temp directory
-// and race on the rename; both orderings leave a complete, identically
-// contented dir, so no locking is needed. Debris left by a crashed run is
-// swept before a fresh extraction begins, but only once it is provably not
+// and race on the install rename; the winner installs its tree, and the
+// loser's rename fails because dir already exists. Rather than treat that as
+// an error, the loser re-reads dir's stamp: if it now matches digest, the
+// winner produced an identical result, so the loser discards its own temp
+// tree and returns success instead of surfacing the rename failure. No
+// locking is needed.
+//
+// Debris left by a crashed run is swept before a fresh extraction begins,
+// but only once it is provably not
 // in flight: this process's own leftovers are always removed, while a
 // foreign process's tmp/old directory is removed only once it has sat
 // untouched longer than any real extraction could take.
@@ -72,6 +78,17 @@ func EnsureExtracted(src fs.FS, dir, digest string) error {
 		return fmt.Errorf("content: move existing %s aside: %w", dir, err)
 	}
 	if err := os.Rename(tmp, dir); err != nil {
+		if current, readErr := os.ReadFile(filepath.Join(dir, StampName)); readErr == nil {
+			if strings.TrimSpace(string(current)) == digest {
+				// A peer's install rename won the race; dir already holds an
+				// identically contented tree. Discard our redundant one.
+				if movedAside {
+					_ = os.RemoveAll(old)
+				}
+				_ = os.RemoveAll(tmp)
+				return nil
+			}
+		}
 		if movedAside {
 			_ = os.Rename(old, dir)
 		}
@@ -100,12 +117,19 @@ func removeStale(parent, base, ownTmp, ownOld string) error {
 		return fmt.Errorf("content: remove own stale %s: %w", ownOld, err)
 	}
 
-	for _, pattern := range []string{base + ".tmp-*", base + ".old-*"} {
-		matches, err := filepath.Glob(filepath.Join(parent, pattern))
-		if err != nil {
-			return fmt.Errorf("content: scan for stale %s: %w", pattern, err)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
 		}
-		for _, m := range matches {
+		return fmt.Errorf("content: scan %s for stale entries: %w", parent, err)
+	}
+	for _, prefix := range []string{base + ".tmp-", base + ".old-"} {
+		for _, e := range entries {
+			if !strings.HasPrefix(e.Name(), prefix) {
+				continue
+			}
+			m := filepath.Join(parent, e.Name())
 			if m == ownTmp || m == ownOld {
 				continue
 			}
