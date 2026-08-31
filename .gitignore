@@ -1,2 +1,44 @@
+# === Compiled binary ===
+# Anchored: `go build -o goscape-singleplayer` writes it to the repo root.
 /goscape-singleplayer
+*.exe
+
+# === Runtime state ===
+# The world database (goscape.db*), player saves and the ondemand public dir
+# all live under --data-dir, which defaults to ./data. None of it is source.
 /data/
+
+# === Test / coverage / profiling output ===
+*.test
+coverage.txt
+coverage.html
+*.prof
+*.pprof
+*.pb.gz
+# SIGUSR1 pprof captures written by the client's pkg/profiling.
+/profiles/
+
+# === Local / private config — never push ===
+# Claude Code: per-user local settings + personal session state. To SHARE
+# team config, un-ignore specific paths, e.g.:
+#   !.claude/settings.json
+.claude/
+# Project MCP config can carry server URLs / tokens — ignore by default.
+.mcp.json
+# Private per its own header (CLAUDE.md, by contrast, stays committed).
+CLAUDE.local.md
+
+# === Editors / IDEs ===
+.idea/
+.vscode/
+*.swp
+*~
+
+# === Tool caches ===
+.serena/
+# superpowers SDD scratch workspace (ledger, briefs, review packages)
+.superpowers/
+
+# === OS cruft ===
+.DS_Store
+Thumbs.db

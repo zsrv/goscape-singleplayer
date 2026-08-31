@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Three repos are involved. Tasks 1–2 commit to **goscape-client** on branch `rev-274` (`/home/owner/Code/github.com/zsrv/goscape-client`, currently on `rev-274`; untracked `audit-274/` is pre-existing — never `git add` it). Tasks 3–5 commit to **goscape-singleplayer** on branch `rev-274` (`/home/owner/Code/github.com/zsrv/goscape-singleplayer`). Do not touch the goscape server repo.
+- Three repos are involved. Tasks 1–2 commit to **goscape-client** on branch `rev-274` (`~/Code/github.com/zsrv/goscape-client`, currently on `rev-274`; untracked `audit-274/` is pre-existing — never `git add` it). Tasks 3–5 commit to **goscape-singleplayer** on branch `rev-274` (`~/Code/github.com/zsrv/goscape-singleplayer`). Do not touch the goscape server repo.
 - Run `git status` before every commit and stage only the files this plan names.
 - All commits: `git commit --no-gpg-sign`.
 - All `go` invocations: prefix with `GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache"` (`$TMPDIR` can be empty when the sandbox is off — the `${TMPDIR:-/tmp}` form is mandatory).
@@ -24,9 +24,9 @@
 ### Task 1: Exit hook in goscape-client (`clientextras.ExitFunc`)
 
 **Files:**
-- Modify: `/home/owner/Code/github.com/zsrv/goscape-client/pkg/jagex2/client/clientextras/clientextras.go`
-- Modify: `/home/owner/Code/github.com/zsrv/goscape-client/pkg/jagex2/client/gameshell.go:1-33`
-- Test: `/home/owner/Code/github.com/zsrv/goscape-client/pkg/jagex2/client/clientextras/clientextras_test.go` (create)
+- Modify: `~/Code/github.com/zsrv/goscape-client/pkg/jagex2/client/clientextras/clientextras.go`
+- Modify: `~/Code/github.com/zsrv/goscape-client/pkg/jagex2/client/gameshell.go:1-33`
+- Test: `~/Code/github.com/zsrv/goscape-client/pkg/jagex2/client/clientextras/clientextras_test.go` (create)
 
 **Interfaces:**
 - Consumes: nothing.
@@ -59,7 +59,7 @@ func TestExitFuncDefaultsToOSExit(t *testing.T) {
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-client
+cd ~/Code/github.com/zsrv/goscape-client
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" CGO_ENABLED=1 go test ./pkg/jagex2/client/clientextras/ -run TestExitFuncDefaultsToOSExit -v
 ```
 
@@ -115,7 +115,7 @@ Then fix imports: `os` was only used by line 32 (verified by grep), so remove `"
 - [ ] **Step 6: Verify the whole module still builds and tests pass**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-client
+cd ~/Code/github.com/zsrv/goscape-client
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" CGO_ENABLED=1 go build ./... && \
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" CGO_ENABLED=1 go test ./pkg/jagex2/client/... ./pkg/sign/...
 ```
@@ -125,7 +125,7 @@ Expected: build OK, tests PASS (no test currently drives Shutdown; this is a com
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-client && git status --short
+cd ~/Code/github.com/zsrv/goscape-client && git status --short
 git add pkg/jagex2/client/clientextras/clientextras.go pkg/jagex2/client/clientextras/clientextras_test.go pkg/jagex2/client/gameshell.go
 git commit --no-gpg-sign -m "feat(clientextras): ExitFunc hook so embedders can intercept process exit"
 ```
@@ -135,9 +135,9 @@ git commit --no-gpg-sign -m "feat(clientextras): ExitFunc hook so embedders can 
 ### Task 2: Extract `pkg/jagex2/launch` from `cmd/client`
 
 **Files:**
-- Create: `/home/owner/Code/github.com/zsrv/goscape-client/pkg/jagex2/launch/launch.go`
-- Test: `/home/owner/Code/github.com/zsrv/goscape-client/pkg/jagex2/launch/launch_test.go`
-- Modify: `/home/owner/Code/github.com/zsrv/goscape-client/cmd/client/main.go` (full rewrite shown below; `worldserver.go` and the `parseOndemandServer` file stay in `cmd/client` untouched)
+- Create: `~/Code/github.com/zsrv/goscape-client/pkg/jagex2/launch/launch.go`
+- Test: `~/Code/github.com/zsrv/goscape-client/pkg/jagex2/launch/launch_test.go`
+- Modify: `~/Code/github.com/zsrv/goscape-client/cmd/client/main.go` (full rewrite shown below; `worldserver.go` and the `parseOndemandServer` file stay in `cmd/client` untouched)
 
 **Interfaces:**
 - Consumes: `clientextras.ExitFunc` (Task 1), existing `client`/`signlink`/`audio`/`platform`/`profiling` package APIs.
@@ -255,7 +255,7 @@ func TestConfigureAppliesOptions(t *testing.T) {
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-client
+cd ~/Code/github.com/zsrv/goscape-client
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" CGO_ENABLED=1 go test ./pkg/jagex2/launch/ -v
 ```
 
@@ -460,7 +460,7 @@ func main() {
 - [ ] **Step 6: Verify build, tests, and formatting across the module**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-client
+cd ~/Code/github.com/zsrv/goscape-client
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" CGO_ENABLED=1 go build ./... && \
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" CGO_ENABLED=1 go test ./... && \
 gofmt -l pkg/jagex2/launch cmd/client
@@ -471,7 +471,7 @@ Expected: build OK, all tests PASS, `gofmt -l` prints nothing.
 - [ ] **Step 7: Verify the stock binary still behaves (headless paths)**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-client
+cd ~/Code/github.com/zsrv/goscape-client
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" CGO_ENABLED=1 go run ./cmd/client -version
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" CGO_ENABLED=1 go run ./cmd/client -mem bogus; echo "exit=$?"
 ```
@@ -481,7 +481,7 @@ Expected: first prints build info and exits 0; second prints `invalid -mem "bogu
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-client && git status --short
+cd ~/Code/github.com/zsrv/goscape-client && git status --short
 git add pkg/jagex2/launch/launch.go pkg/jagex2/launch/launch_test.go cmd/client/main.go
 git commit --no-gpg-sign -m "refactor(launch): extract embeddable client startup from cmd/client"
 ```
@@ -490,7 +490,7 @@ git commit --no-gpg-sign -m "refactor(launch): extract embeddable client startup
 
 ### Task 3: goscape-singleplayer module scaffold + config builder
 
-**Files (all under `/home/owner/Code/github.com/zsrv/goscape-singleplayer`, branch `rev-274`):**
+**Files (all under `~/Code/github.com/zsrv/goscape-singleplayer`, branch `rev-274`):**
 - Create: `go.mod`, `.gitignore`
 - Create: `internal/server/config.go`
 - Test: `internal/server/config_test.go`
@@ -647,7 +647,7 @@ func TestCheckCache(t *testing.T) {
 - [ ] **Step 3: Run test to verify it fails**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-singleplayer
+cd ~/Code/github.com/zsrv/goscape-singleplayer
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" go test ./internal/server/ -v
 ```
 
@@ -741,7 +741,7 @@ func CheckCache(cacheDir string) error {
 - [ ] **Step 5: Tidy and run tests to verify they pass**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-singleplayer
+cd ~/Code/github.com/zsrv/goscape-singleplayer
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" go mod tidy && \
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" go test ./internal/server/ -v
 ```
@@ -751,7 +751,7 @@ Expected: tidy rewrites the require versions to `v0.0.0-00010101000000-000000000
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-singleplayer && git status --short
+cd ~/Code/github.com/zsrv/goscape-singleplayer && git status --short
 git add go.mod go.sum .gitignore internal/server/config.go internal/server/config_test.go
 git commit --no-gpg-sign -m "feat(server): module scaffold + programmatic loopback stack config"
 ```
@@ -842,7 +842,7 @@ func TestServerBootsReadyAndStops(t *testing.T) {
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-singleplayer
+cd ~/Code/github.com/zsrv/goscape-singleplayer
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" go test ./internal/server/ -run TestServerBootsReadyAndStops -v
 ```
 
@@ -959,7 +959,7 @@ func (s *Server) Stop(timeout time.Duration) error {
 - [ ] **Step 4: Run the test to verify it passes (or legitimately skips)**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-singleplayer
+cd ~/Code/github.com/zsrv/goscape-singleplayer
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" go test ./internal/server/ -run TestServerBootsReadyAndStops -v -timeout 120s
 ```
 
@@ -968,7 +968,7 @@ Expected: PASS if `../goscape/data/pack` holds a packed cache (boot logs are dis
 - [ ] **Step 5: Run the whole package suite and vet**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-singleplayer
+cd ~/Code/github.com/zsrv/goscape-singleplayer
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" go test ./... && \
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" go vet ./...
 ```
@@ -978,7 +978,7 @@ Expected: PASS / no vet findings.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-singleplayer && git status --short
+cd ~/Code/github.com/zsrv/goscape-singleplayer && git status --short
 git add internal/server/server.go internal/server/server_test.go
 git commit --no-gpg-sign -m "feat(server): in-process lifecycle — Start, /crc readiness, graceful Stop"
 ```
@@ -1139,7 +1139,7 @@ func main() {
 - [ ] **Step 2: Build everything and exercise the headless paths**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-singleplayer
+cd ~/Code/github.com/zsrv/goscape-singleplayer
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" CGO_ENABLED=1 go build -o goscape-singleplayer ./cmd/goscape-singleplayer
 ./goscape-singleplayer --help
 ./goscape-singleplayer --cache-dir /nonexistent; echo "exit=$?"
@@ -1150,7 +1150,7 @@ Expected: build OK; `--help` lists the eight flags; the bad cache-dir run prints
 - [ ] **Step 3: Run the full test suite once more**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-singleplayer
+cd ~/Code/github.com/zsrv/goscape-singleplayer
 GOPATH="${TMPDIR:-/tmp}/go" GOCACHE="${TMPDIR:-/tmp}/go-cache" go test ./... && gofmt -l cmd internal
 ```
 
@@ -1185,7 +1185,7 @@ collide: `--world-port 43594 --ondemand-port 8080 --login-port 2004
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/owner/Code/github.com/zsrv/goscape-singleplayer && git status --short
+cd ~/Code/github.com/zsrv/goscape-singleplayer && git status --short
 git add cmd/goscape-singleplayer/main.go README.md
 git commit --no-gpg-sign -m "feat: goscape-singleplayer binary — embedded server + client over loopback"
 ```
