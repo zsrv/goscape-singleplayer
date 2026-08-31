@@ -1,0 +1,12 @@
+# Normalise line endings on the way into the repository, so a checkout on
+# Windows can be CRLF locally without every file coming back as modified.
+# No tracked file currently contains CRLF, so this changes nothing today; it
+# exists to keep it that way.
+* text=auto
+
+# Shell scripts must stay LF even on a Windows checkout — CRLF in a script
+# breaks its shebang line.
+*.sh text eol=lf
+
+# Keep the language statistics about the launcher, not its documentation.
+docs/** linguist-documentation=true
