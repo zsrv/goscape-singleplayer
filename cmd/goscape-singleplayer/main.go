@@ -18,6 +18,8 @@ import (
 
 	"github.com/zsrv/goscape-client/pkg/jagex2/client/clientextras"
 	"github.com/zsrv/goscape-client/pkg/jagex2/launch"
+	"github.com/zsrv/goscape-singleplayer/internal/build"
+	"github.com/zsrv/goscape-singleplayer/internal/content"
 	"github.com/zsrv/goscape-singleplayer/internal/server"
 )
 
@@ -36,7 +38,14 @@ func main() {
 	friendsPort := flag.Int("friends-port", 2005, "loopback friends gRPC port (internal)")
 	mem := flag.String("mem", "high", "client memory mode: high|low")
 	worldType := flag.String("world-type", "members", "world type: free|members")
+	showVersion := flag.Bool("version", false, "print build and content provenance, then exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(build.Info())
+		fmt.Println(content.Info())
+		return
+	}
 
 	var lowMemory bool
 	switch *mem {
@@ -58,13 +67,27 @@ func main() {
 		fatalf("invalid -world-type %q (want free|members)", *worldType)
 	}
 
-	if err := server.CheckCache(*cacheDir); err != nil {
+	explicitCacheDir := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "cache-dir" {
+			explicitCacheDir = true
+		}
+	})
+
+	bundle, haveBundle := content.Bundle()
+	resolvedCacheDir, resolveErr := content.ResolveCacheDir(
+		explicitCacheDir, *cacheDir, *dataDir, bundle, haveBundle, content.PackDigest)
+	if resolveErr != nil {
+		fatalf("%v", resolveErr)
+	}
+
+	if err := server.CheckCache(resolvedCacheDir); err != nil {
 		fatalf("%v", err)
 	}
 
 	cfg, err := server.NewConfig(server.Options{
 		DataDir:      *dataDir,
-		CacheDir:     *cacheDir,
+		CacheDir:     resolvedCacheDir,
 		WordEncPath:  *wordencPath,
 		WorldPort:    *worldPort,
 		OndemandPort: *ondemandPort,

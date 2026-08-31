@@ -1,0 +1,6 @@
+# Pinned LostCityRS/Content revision for this branch. Bump with a commit that
+# says what changed upstream; `make embed-pack` reads this file, and the
+# release workflow stamps the commit into the binary.
+repo   = LostCityRS/Content
+branch = 245.2
+commit = cbcfe6706ef9f4093e5b8e4c9cfee93577346993

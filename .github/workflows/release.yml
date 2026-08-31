@@ -1,0 +1,217 @@
+name: release
+
+# Tag shape: rev274-v1.0.0 — the revision, then the release semver. Mirrors
+# goscape-client's convention so artifacts across the family sort together.
+on:
+  push:
+    tags: ['rev*-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  # A tag that fails the normal gate never reaches the build matrix.
+  gate:
+    uses: ./.github/workflows/go.yml
+
+  # Packing runs the RuneScript compiler. Doing it once here rather than in
+  # each matrix job saves four redundant runs AND guarantees every platform
+  # embeds a byte-identical bundle, so the stamped PackDigest — which is what
+  # -version invites users to compare — is the same everywhere.
+  pack:
+    needs: gate
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.digest.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Pack the pinned Content revision
+        run: make embed-pack
+
+      - id: digest
+        name: Record the bundle digest
+        run: |
+          cd internal/content/embedded/bundle
+          d=$(find . -type f -print0 | LC_ALL=C sort -z \
+              | xargs -0 shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+          echo "digest=sha256:$d" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle
+          path: internal/content/embedded/bundle
+          retention-days: 1
+
+  build:
+    needs: pack
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-amd64,   os: ubuntu-26.04,     ext: tar.gz }
+          - { target: linux-arm64,   os: ubuntu-26.04-arm, ext: tar.gz }
+          - { target: darwin-amd64,  os: macos-26-intel,   ext: tar.gz }
+          - { target: darwin-arm64,  os: macos-15,         ext: tar.gz }
+          - { target: windows-amd64, os: windows-2025,     ext: zip }
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install native build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc pkg-config libffi-dev \
+            libgl-dev libgles-dev libegl-dev \
+            libx11-dev libx11-xcb-dev libxkbcommon-x11-dev \
+            libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev \
+            libxxf86vm-dev \
+            libasound2-dev
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle
+          path: internal/content/embedded/bundle
+
+      # PackDigest doubles as the runtime extraction stamp, so a bundle that
+      # landed corrupted or partial must never be stamped with the digest the
+      # pack job computed over the original. Recompute it here, over what
+      # actually downloaded, and fail before it can be baked into a binary.
+      - name: Verify the downloaded bundle matches its digest
+        shell: bash
+        env:
+          DIGEST: ${{ needs.pack.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cd internal/content/embedded/bundle
+          d=$(find . -type f -print0 | LC_ALL=C sort -z \
+              | xargs -0 shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+          got="sha256:$d"
+          if [ "$got" != "$DIGEST" ]; then
+            echo "downloaded bundle digest mismatch: got $got, want $DIGEST" >&2
+            exit 1
+          fi
+
+      # The tag is checked out detached, so Branch is derived from the tag's
+      # rev prefix (rev274-v1.0.0 -> rev-274). Untrusted input reaches the
+      # script through env, never string interpolation.
+      - name: Build
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+          DIGEST: ${{ needs.pack.outputs.digest }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          rev="${VERSION%%-v*}"                 # rev274
+          branch="rev-${rev#rev}"               # rev-274
+          B=github.com/zsrv/goscape-singleplayer/internal/build
+          C=github.com/zsrv/goscape-singleplayer/internal/content
+          repo=$(sed -n 's/^repo[[:space:]]*=[[:space:]]*//p' content.lock)
+          cbranch=$(sed -n 's/^branch[[:space:]]*=[[:space:]]*//p' content.lock)
+          commit=$(sed -n 's/^commit[[:space:]]*=[[:space:]]*//p' content.lock)
+          # An `[ ... ] && x=y` one-liner would abort the step under set -e on
+          # every non-Windows runner, because the false test makes the list
+          # return 1. Use an explicit if.
+          bin=goscape-singleplayer
+          if [ "$RUNNER_OS" = Windows ]; then bin=goscape-singleplayer.exe; fi
+          CGO_ENABLED=1 go build -trimpath -tags embedcache \
+            -ldflags "-s -w \
+              -X $B.Version=$VERSION \
+              -X $B.Revision=$(git rev-parse --short HEAD) \
+              -X $B.Branch=$branch \
+              -X $B.BuildUser=$ACTOR@github-actions \
+              -X $B.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+              -X $C.Repo=$repo \
+              -X $C.Branch=$cbranch \
+              -X $C.Commit=$commit \
+              -X $C.PackDigest=$DIGEST" \
+            -o "$bin" ./cmd/goscape-singleplayer
+
+      - name: Verify the binary reports its content
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin=./goscape-singleplayer
+          if [ "$RUNNER_OS" = Windows ]; then bin=./goscape-singleplayer.exe; fi
+          out=$("$bin" -version)
+          echo "$out"
+          echo "$out" | grep -q "embedded:  yes"
+
+      - name: Archive (tar.gz)
+        if: matrix.ext == 'tar.gz'
+        env:
+          VERSION: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
+        run: tar -czf "goscape-singleplayer-${VERSION}-${TARGET}.tar.gz" goscape-singleplayer LICENSE NOTICE README.md
+
+      - name: Archive (zip)
+        if: matrix.ext == 'zip'
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
+        run: 7z a "goscape-singleplayer-${VERSION}-${TARGET}.zip" goscape-singleplayer.exe LICENSE NOTICE README.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: goscape-singleplayer-*.${{ matrix.ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # pattern excludes the pack job's "bundle" artifact: every real target
+      # name (linux-amd64, darwin-arm64, ...) contains a hyphen and "bundle"
+      # does not, so an unscoped download here can't pull the packed content
+      # cache in alongside the five platform archives.
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: '*-*'
+          merge-multiple: true
+
+      # Assert dist/ holds exactly the five expected archives, and nothing
+      # else, before publishing anything. This must hold independently of
+      # the pattern filter above: it is not there to trust the download
+      # step but to catch it (or a matrix job failing to produce its
+      # archive, or anything else) if it is ever wrong, and fail loud here
+      # rather than let gh release create upload the wrong thing.
+      - name: Verify the release payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=$(find dist -mindepth 1 -maxdepth 1 | wc -l)
+          if [ "$count" -ne 5 ]; then
+            echo "expected exactly 5 entries in dist/, found $count:" >&2
+            find dist -mindepth 1 -maxdepth 1 >&2
+            exit 1
+          fi
+          nonfiles=$(find dist -mindepth 1 -maxdepth 1 -not -type f)
+          if [ -n "$nonfiles" ]; then
+            echo "dist/ must contain only regular files, found:" >&2
+            echo "$nonfiles" >&2
+            exit 1
+          fi
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ github.ref_name }}
+        run: gh release create "$VERSION" dist/* --generate-notes
