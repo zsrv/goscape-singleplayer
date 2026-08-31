@@ -3,8 +3,8 @@ module github.com/zsrv/goscape-singleplayer
 go 1.26
 
 require (
-	github.com/zsrv/goscape v0.0.0
-	github.com/zsrv/goscape-client v0.0.0-00010101000000-000000000000
+	github.com/zsrv/goscape v0.0.0-20260831000000-11ac7d989dd8
+	github.com/zsrv/goscape-client v0.0.0-20260710000000-b5fb79139ceb
 )
 
 require (
@@ -61,9 +61,4 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.50.1 // indirect
-)
-
-replace (
-	github.com/zsrv/goscape => ../goscape-rev244
-	github.com/zsrv/goscape-client => ../goscape-client-rev244
 )
