@@ -24,7 +24,7 @@ revision branches) and is MIT-licensed.
 | Content selection | Pinned commit per branch in `content.lock` | A tag rebuilds byte-identically; the stamped hash is known before the build runs; content bumps are reviewable commits |
 | Embedding | Optional, behind the `embedcache` build tag | Source builds stay small and asset-free; only releases carry content |
 | Delivery | Embedded in the binary | Works offline, one file to download; chosen over fetch-on-first-run |
-| Cache access | Extract to `<data-dir>/cache` at startup | goscape reads the cache by path; see *Rejected: the `fs.FS` port* |
+| Cache access | Extract the bundle to `<data-dir>/content/` at startup | goscape reads the cache by path; see *Rejected: the `fs.FS` port* |
 | Packer | `go run github.com/zsrv/goscape/cmd/goscape-cli pack` from the **pinned** goscape | The packer always matches the server that will read the pack; no goscape checkout in CI |
 | Release artifacts | Embedded only, 5 native targets | One obvious download; mirrors goscape-client's release matrix |
 | Provenance | `-version`, mirroring `goscape-client`'s `pkg/util/build` | One familiar flag across the repo family |
@@ -72,28 +72,40 @@ internal/content/
     source.go               FS() (fs.FS, bool) — the embed seam
     extract.go              materialize an fs.FS into a directory, stamp-guarded
     extract_test.go
-    testdata/fixturepack/   few-KB pack standing in for the real one in CI
+    testdata/fixturebundle/ few-KB bundle standing in for the real one in CI
     embedded/
-        embed_on.go         //go:build embedcache   -> //go:embed all:pack
+        embed_on.go         //go:build embedcache   -> //go:embed all:bundle
         embed_off.go        //go:build !embedcache  -> nil, false
-        pack/               GITIGNORED — produced by `make embed-pack`
+        bundle/             GITIGNORED — produced by `make embed-pack`
+            pack/           goscape-cli pack output
+            raw/wordenc     rev-244+ only; copied from the goscape module
 content.lock                pinned Content commit for this branch
 Makefile                    embed-pack, embed-pack-fixture, build targets
 ```
 
 `embed_off.go` returns `(nil, false)`, so a default build never references
-`pack/` and does not care that it is absent. With `-tags embedcache` and no
-`pack/`, the build fails at compile time with Go's own `pattern pack: no
+`bundle/` and does not care that it is absent. With `-tags embedcache` and no
+`bundle/`, the build fails at compile time with Go's own `pattern bundle: no
 matching files found` — an early, clear failure rather than a binary that
-silently ships an empty cache. The pattern is `all:pack` so nothing is skipped
-for a leading dot or underscore.
+silently ships an empty cache. The pattern is `all:bundle` so nothing is
+skipped for a leading dot or underscore.
+
+**Why a bundle rather than the pack alone.** On rev-244 … rev-274 the binary
+needs two things, not one: the packed cache *and* the raw `wordenc` jagfile,
+which is an **input** to the packer and therefore never appears in its output.
+`main.go` derives the wordenc default as `<cache-dir>/../raw/wordenc` and
+`server.CheckWordEnc` fails fast when it is missing, so an extracted tree
+containing only the pack would start and then abort. Embedding a bundle whose
+two members are `pack/` and `raw/` makes the existing default resolve with no
+change to the derivation logic. On rev-225 the bundle has no `raw/` member,
+since that revision's packer compiles wordenc into `pack/client/wordenc`.
 
 ## content.lock and the pack pipeline
 
 ```
 repo   = LostCityRS/Content
 branch = 274
-commit = 2b62ae68d5f1...
+commit = 2b62ae68dfed02b441bae47987a01d6bcbaeb358
 ```
 
 `make embed-pack` reads it and runs, with no goscape checkout:
@@ -103,7 +115,8 @@ git clone --filter=blob:none https://github.com/LostCityRS/Content "$W"
 git -C "$W" checkout "$COMMIT"
 RAW=$(go list -m -f '{{.Dir}}' github.com/zsrv/goscape)/data/raw   # rev-244+ only
 go run github.com/zsrv/goscape/cmd/goscape-cli pack \
-    --src-dir "$W" --out-dir internal/content/embedded/pack --raw-dir "$RAW"
+    --src-dir "$W" --out-dir internal/content/embedded/bundle/pack --raw-dir "$RAW"
+install -m 0644 "$RAW/wordenc" internal/content/embedded/bundle/raw/wordenc
 ```
 
 Verified: `go run github.com/zsrv/goscape/cmd/goscape-cli` resolves from this
@@ -141,34 +154,41 @@ Resolved once in `main`, before `server.CheckCache`:
 
 1. `--cache-dir` **explicitly passed** — detected with `flag.Visit`, so the
    documented `./data/pack` default still works — use it verbatim and ignore
-   the embedded cache.
-2. Otherwise, a cache is embedded — ensure it is extracted at
-   `<data-dir>/cache` and use that.
+   the embedded bundle.
+2. Otherwise, a bundle is embedded — ensure it is extracted at
+   `<data-dir>/content/`, then use `<data-dir>/content/pack` as the cache
+   directory.
 3. Otherwise — today's actionable "no packed cache" error, unchanged.
 
-`server.CheckCache` moves to after this resolution so it validates the chosen
-directory rather than firing before extraction has happened.
+Extracting the bundle to `<data-dir>/content/` is what makes the wordenc
+default work untouched: with the cache directory at `<data-dir>/content/pack`,
+the existing `<cache-dir>/../raw/wordenc` derivation lands on
+`<data-dir>/content/raw/wordenc`, exactly where the bundle put it.
+
+`server.CheckCache` and `server.CheckWordEnc` both move to after this
+resolution, so they validate the chosen directory rather than firing before
+extraction has happened.
 
 Extraction is idempotent and stamp-guarded:
 
-- Read `<data-dir>/cache/.content-stamp`. If it equals the injected
+- Read `<data-dir>/content/.content-stamp`. If it equals the injected
   `PackDigest`, skip entirely — an O(1) string compare, so warm starts pay
   nothing.
-- Otherwise walk the embedded FS into `<data-dir>/cache.tmp-<pid>`, writing
+- Otherwise walk the embedded FS into `<data-dir>/content.tmp-<pid>`, writing
   `.content-stamp` **last**. Then swap it in, in this order: rename any
-  existing `cache/` to `cache.old-<pid>`, rename the temp directory to
-  `cache/`, and only then remove `cache.old-<pid>`. Deleting the live tree
+  existing `content/` to `content.old-<pid>`, rename the temp directory to
+  `content/`, and only then remove `content.old-<pid>`. Deleting the live tree
   before the replacement is in place would leave no cache at all if the rename
   failed.
 - Writing the stamp last means an interrupted extraction is never mistaken for
   a complete one, since a temp tree without a stamp is never promoted. The
   rename makes the swap atomic within a filesystem.
-- Any leftover `cache.tmp-*` or `cache.old-*` directories from a crashed run
+- Any leftover `content.tmp-*` or `content.old-*` directories from a crashed run
   are removed at the start of the next extraction. They are the only way this
   scheme can accumulate anything.
 - Two instances starting concurrently each extract to their own pid-suffixed
   temp directory and race on the rename. Both orderings leave a complete,
-  identically-contented `cache/`, so no locking is needed.
+  identically-contented `content/`, so no locking is needed.
 - An upgraded binary carries a different digest and re-extracts automatically,
   with no user action and no stale-cache failure mode.
 
@@ -253,14 +273,14 @@ FS, so no large fixture is needed:
 | stamp differs (upgrade) | old tree removed, re-extracted |
 | stamp missing, tree present | re-extracted, not trusted |
 | interrupted extraction (temp dir, no stamp) | not mistaken for complete |
-| stale `cache.tmp-*` / `cache.old-*` present | removed before extracting |
+| stale `content.tmp-*` / `content.old-*` present | removed before extracting |
 | precedence | table test over explicit/default `--cache-dir` × embedded/not |
 | provenance rendering | embedded and non-embedded forms |
 
 Build coverage needs deliberate care: without it, the `embedcache` path would
 only ever compile during a release. CI gains a second build job running
-`make embed-pack-fixture`, which copies `internal/content/testdata/fixturepack/`
-into `embedded/pack/` and builds with the tag. The real 39 MB pack stays out of
+`make embed-pack-fixture`, which copies `internal/content/testdata/fixturebundle/`
+into `embedded/bundle/` and builds with the tag. The real 39 MB pack stays out of
 git while every push still proves the embed directive resolves and the tagged
 code compiles.
 
