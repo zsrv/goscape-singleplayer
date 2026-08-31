@@ -166,19 +166,26 @@ jobs:
           pattern: '*-*'
           merge-multiple: true
 
-      # Assert dist/ holds exactly the five expected archives before
-      # publishing anything. This is the safety net for the artifact-name
-      # collision above: if the pattern above ever admits something
-      # unexpected (or a matrix job fails to produce its archive), fail loud
-      # here rather than let gh release create upload the wrong thing.
+      # Assert dist/ holds exactly the five expected archives, and nothing
+      # else, before publishing anything. This must hold independently of
+      # the pattern filter above: it is not there to trust the download
+      # step but to catch it (or a matrix job failing to produce its
+      # archive, or anything else) if it is ever wrong, and fail loud here
+      # rather than let gh release create upload the wrong thing.
       - name: Verify the release payload
         shell: bash
         run: |
           set -euo pipefail
-          count=$(find dist -maxdepth 1 -type f | wc -l)
+          count=$(find dist -mindepth 1 -maxdepth 1 | wc -l)
           if [ "$count" -ne 5 ]; then
-            echo "expected exactly 5 files in dist/, found $count:" >&2
-            find dist -maxdepth 1 -mindepth 1 >&2
+            echo "expected exactly 5 entries in dist/, found $count:" >&2
+            find dist -mindepth 1 -maxdepth 1 >&2
+            exit 1
+          fi
+          nonfiles=$(find dist -mindepth 1 -maxdepth 1 -not -type f)
+          if [ -n "$nonfiles" ]; then
+            echo "dist/ must contain only regular files, found:" >&2
+            echo "$nonfiles" >&2
             exit 1
           fi
 
@@ -186,5 +193,6 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ github.ref_name }}
         run: gh release create "$VERSION" dist/* --generate-notes
