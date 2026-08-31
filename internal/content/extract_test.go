@@ -97,8 +97,13 @@ func TestEnsureExtractedDistrustsTreeWithoutStamp(t *testing.T) {
 func TestEnsureExtractedRemovesStaleTempDirs(t *testing.T) {
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "content")
+	old := time.Now().Add(-2 * staleForeignThreshold)
 	for _, name := range []string{"content.tmp-999", "content.old-999"} {
-		if err := os.MkdirAll(filepath.Join(parent, name, "junk"), 0o755); err != nil {
+		p := filepath.Join(parent, name)
+		if err := os.MkdirAll(filepath.Join(p, "junk"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, old, old); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -113,6 +118,40 @@ func TestEnsureExtractedRemovesStaleTempDirs(t *testing.T) {
 		if e.Name() != "content" {
 			t.Errorf("leftover directory not cleaned: %s", e.Name())
 		}
+	}
+}
+
+func TestEnsureExtractedPreservesRecentForeignTempDir(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "content")
+	foreign := filepath.Join(parent, "content.tmp-424242")
+	if err := os.MkdirAll(filepath.Join(foreign, "junk"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureExtracted(testBundle(), dir, "digest-1"); err != nil {
+		t.Fatalf("EnsureExtracted: %v", err)
+	}
+	if _, err := os.Stat(foreign); err != nil {
+		t.Errorf("a recent foreign temp dir must survive — it may be a live peer's in-flight extraction: %v", err)
+	}
+}
+
+func TestEnsureExtractedRemovesOldForeignTempDir(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "content")
+	foreign := filepath.Join(parent, "content.tmp-424242")
+	if err := os.MkdirAll(filepath.Join(foreign, "junk"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * staleForeignThreshold)
+	if err := os.Chtimes(foreign, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureExtracted(testBundle(), dir, "digest-1"); err != nil {
+		t.Fatalf("EnsureExtracted: %v", err)
+	}
+	if _, err := os.Stat(foreign); !os.IsNotExist(err) {
+		t.Error("an old foreign temp dir from a crashed run must be removed")
 	}
 }
 

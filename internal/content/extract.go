@@ -8,11 +8,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // StampName is the file inside an extracted content directory recording the
 // pack digest that produced it.
 const StampName = ".content-stamp"
+
+// staleForeignThreshold is how old a foreign process's tmp/old directory's
+// modification time must be before removeStale treats it as debris from a
+// crashed run rather than a live peer's in-flight extraction. Extracting the
+// real ~39 MB bundle takes seconds, so an hour is generous headroom.
+const staleForeignThreshold = time.Hour
 
 // EnsureExtracted materializes src into dir, unless dir already carries a
 // stamp equal to digest.
@@ -24,8 +31,12 @@ const StampName = ".content-stamp"
 // no cache at all if the second rename failed.
 //
 // Concurrent callers each extract into their own pid-suffixed temp directory
-// and race on the rename. Both orderings leave a complete, identically
-// contented dir, so no locking is needed.
+// and race on the rename; both orderings leave a complete, identically
+// contented dir, so no locking is needed. Debris left by a crashed run is
+// swept before a fresh extraction begins, but only once it is provably not
+// in flight: this process's own leftovers are always removed, while a
+// foreign process's tmp/old directory is removed only once it has sat
+// untouched longer than any real extraction could take.
 func EnsureExtracted(src fs.FS, dir, digest string) error {
 	if digest == "" {
 		return errors.New("content: refusing to extract without a pack digest (binary was not stamped at build time)")
@@ -37,16 +48,13 @@ func EnsureExtracted(src fs.FS, dir, digest string) error {
 	}
 
 	parent, base := filepath.Dir(dir), filepath.Base(dir)
-	if err := removeStale(parent, base); err != nil {
-		return err
-	}
-
 	pid := os.Getpid()
 	tmp := filepath.Join(parent, fmt.Sprintf("%s.tmp-%d", base, pid))
 	old := filepath.Join(parent, fmt.Sprintf("%s.old-%d", base, pid))
-	if err := os.RemoveAll(tmp); err != nil {
-		return fmt.Errorf("content: clear %s: %w", tmp, err)
+	if err := removeStale(parent, base, tmp, old); err != nil {
+		return err
 	}
+
 	if err := writeTree(src, tmp); err != nil {
 		_ = os.RemoveAll(tmp)
 		return err
@@ -77,13 +85,37 @@ func EnsureExtracted(src fs.FS, dir, digest string) error {
 }
 
 // removeStale clears temp and aside directories left by a crashed run.
-func removeStale(parent, base string) error {
+//
+// ownTmp and ownOld — this process's own pid-suffixed directories — are
+// always removed; no other process can be using them. A directory belonging
+// to another pid is removed only when its modification time is older than
+// staleForeignThreshold, since a live peer's in-flight extraction leaves an
+// identically-shaped directory that must not be deleted out from under it.
+// If the directory can't be stat'd, it is left alone rather than guessed at.
+func removeStale(parent, base, ownTmp, ownOld string) error {
+	if err := os.RemoveAll(ownTmp); err != nil {
+		return fmt.Errorf("content: remove own stale %s: %w", ownTmp, err)
+	}
+	if err := os.RemoveAll(ownOld); err != nil {
+		return fmt.Errorf("content: remove own stale %s: %w", ownOld, err)
+	}
+
 	for _, pattern := range []string{base + ".tmp-*", base + ".old-*"} {
 		matches, err := filepath.Glob(filepath.Join(parent, pattern))
 		if err != nil {
 			return fmt.Errorf("content: scan for stale %s: %w", pattern, err)
 		}
 		for _, m := range matches {
+			if m == ownTmp || m == ownOld {
+				continue
+			}
+			info, err := os.Stat(m)
+			if err != nil {
+				continue // can't confirm it's not in flight; leave it alone
+			}
+			if time.Since(info.ModTime()) < staleForeignThreshold {
+				continue // recent enough that a live peer may still be writing it
+			}
 			if err := os.RemoveAll(m); err != nil {
 				return fmt.Errorf("content: remove stale %s: %w", m, err)
 			}
