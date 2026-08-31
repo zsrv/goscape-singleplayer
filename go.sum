@@ -100,6 +100,10 @@ github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UV
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
+github.com/zsrv/goscape v0.0.0-20260831000000-1512ce7f6e86 h1:w6mPAVx59alMzmqv6ChPOK35mlIy+zkqt/XYmQMDBGI=
+github.com/zsrv/goscape v0.0.0-20260831000000-1512ce7f6e86/go.mod h1:XCljOOdG7iRQP2UETTtXtvHnH9FHMxgvXmDtlAJznws=
+github.com/zsrv/goscape-client v0.0.0-20260710000000-63a5028e342e h1:GQMhWXTJ/L5pgNqa+iiyAks69WEjomuH71CO90sEfG8=
+github.com/zsrv/goscape-client v0.0.0-20260710000000-63a5028e342e/go.mod h1:CBJbmrpKds7AaEy7yg5BA2d6Ey0Cined7MLbBreDd9w=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0 h1:CqXxU8VOmDefoh0+ztfGaymYbhdB/tT3zs79QaZTNGY=
