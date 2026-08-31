@@ -183,12 +183,27 @@ Extraction is idempotent and stamp-guarded:
 - Writing the stamp last means an interrupted extraction is never mistaken for
   a complete one, since a temp tree without a stamp is never promoted. The
   rename makes the swap atomic within a filesystem.
-- Any leftover `content.tmp-*` or `content.old-*` directories from a crashed run
-  are removed at the start of the next extraction. They are the only way this
-  scheme can accumulate anything.
 - Two instances starting concurrently each extract to their own pid-suffixed
   temp directory and race on the rename. Both orderings leave a complete,
   identically-contented `content/`, so no locking is needed.
+- Any leftover `content.tmp-*` or `content.old-*` directories from a crashed run
+  are swept at the start of the next extraction. They are the only way this
+  scheme can accumulate anything. **The sweep must not be unconditional.** A
+  directory belonging to another pid is indistinguishable, by name alone, from
+  a live peer's in-flight extraction — and deleting one is not merely rude, it
+  is silently corrupting: `writeTree` calls `os.MkdirAll` per entry, so the
+  victim recreates the deleted structure without error, stamps the resulting
+  partial tree as complete, and renames it into place. It is then never
+  re-extracted. So: a process always clears its **own** pid's leftovers, and
+  clears a **foreign** one only when its mtime is older than a conservative
+  liveness threshold no in-flight extraction could still be inside (an
+  extraction of the real bundle takes seconds; the threshold is an hour). If
+  the stat fails, the directory is left alone rather than guessed at.
+
+  This ordering matters: the concurrency guarantee above is a property of the
+  pid-suffixed temp directories plus atomic rename *alone*. The sweep is the
+  only thing that can falsify it, which is why it is constrained rather than
+  the guarantee weakened.
 - An upgraded binary carries a different digest and re-extracts automatically,
   with no user action and no stale-cache failure mode.
 
@@ -273,7 +288,8 @@ FS, so no large fixture is needed:
 | stamp differs (upgrade) | old tree removed, re-extracted |
 | stamp missing, tree present | re-extracted, not trusted |
 | interrupted extraction (temp dir, no stamp) | not mistaken for complete |
-| stale `content.tmp-*` / `content.old-*` present | removed before extracting |
+| stale `content.tmp-*` / `content.old-*`, own pid or aged | removed before extracting |
+| foreign `content.tmp-*` with a recent mtime | left alone — it may be a live peer |
 | precedence | table test over explicit/default `--cache-dir` × embedded/not |
 | provenance rendering | embedded and non-embedded forms |
 

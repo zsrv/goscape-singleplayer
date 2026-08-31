@@ -493,6 +493,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // StampName is the file inside an extracted content directory recording the
@@ -561,14 +562,36 @@ func EnsureExtracted(src fs.FS, dir, digest string) error {
 	return nil
 }
 
+// staleAfter is how long a foreign temp or aside directory must have gone
+// untouched before this process will treat it as debris rather than as a live
+// peer's work. Extracting the real bundle takes seconds, so an hour is
+// generous. See removeStale for why the margin has to exist at all.
+const staleAfter = time.Hour
+
 // removeStale clears temp and aside directories left by a crashed run.
+//
+// The sweep is deliberately NOT unconditional. A directory belonging to
+// another pid is, by name alone, indistinguishable from a live peer's
+// in-flight extraction — and deleting one silently corrupts it rather than
+// failing loudly, because writeTree's per-entry os.MkdirAll recreates the
+// structure underneath the victim, which then stamps a partial tree as
+// complete. So: always clear our own pid's leftovers, and clear a foreign one
+// only once it is provably not in flight. A directory we cannot stat is left
+// alone rather than guessed at.
 func removeStale(parent, base string) error {
+	ours := fmt.Sprintf("-%d", os.Getpid())
 	for _, pattern := range []string{base + ".tmp-*", base + ".old-*"} {
 		matches, err := filepath.Glob(filepath.Join(parent, pattern))
 		if err != nil {
 			return fmt.Errorf("content: scan for stale %s: %w", pattern, err)
 		}
 		for _, m := range matches {
+			if !strings.HasSuffix(m, ours) {
+				info, statErr := os.Stat(m)
+				if statErr != nil || time.Since(info.ModTime()) < staleAfter {
+					continue
+				}
+			}
 			if err := os.RemoveAll(m); err != nil {
 				return fmt.Errorf("content: remove stale %s: %w", m, err)
 			}
