@@ -7,7 +7,7 @@ on:
     tags: ['rev*-v*']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   # A tag that fails the normal gate never reaches the build matrix.
@@ -153,13 +153,38 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      # pattern excludes the pack job's "bundle" artifact: every real target
+      # name (linux-amd64, darwin-arm64, ...) contains a hyphen and "bundle"
+      # does not, so an unscoped download here can't pull the packed content
+      # cache in alongside the five platform archives.
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: '*-*'
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
+      # Assert dist/ holds exactly the five expected archives before
+      # publishing anything. This is the safety net for the artifact-name
+      # collision above: if the pattern above ever admits something
+      # unexpected (or a matrix job fails to produce its archive), fail loud
+      # here rather than let gh release create upload the wrong thing.
+      - name: Verify the release payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=$(find dist -maxdepth 1 -type f | wc -l)
+          if [ "$count" -ne 5 ]; then
+            echo "expected exactly 5 files in dist/, found $count:" >&2
+            find dist -maxdepth 1 -mindepth 1 >&2
+            exit 1
+          fi
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: gh release create "$VERSION" dist/* --generate-notes
