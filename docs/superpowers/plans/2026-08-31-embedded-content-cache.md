@@ -1219,15 +1219,75 @@ make clean
 ```
 Expected: both succeed. Note `TestBundleAbsentWithoutBuildTag` from Task 2 is skipped by neither build — it asserts the *untagged* behaviour, so under `-tags embedcache` it would fail. Before running, guard that test file with `//go:build !embedcache` as its first line.
 
-- [ ] **Step 4: Guard the untagged-only test**
+- [ ] **Step 4: Guard the untagged-only tests, and assert the tagged path**
 
-Add to the very top of `internal/content/source_test.go`, above `package content`:
+Two test files assert untagged-only behaviour, not one: `source_test.go`'s
+`TestBundleAbsentWithoutBuildTag` and `content_test.go`'s
+`TestInfoReportsNotEmbedded` (which asserts `embedded:  no`). Both fail under
+the tag, for the same reason.
+
+Guard `source_test.go` by adding this as its **literal first line**:
 
 ```go
 //go:build !embedcache
 ```
 
-Re-run Step 3 to confirm both tag states now pass.
+Do not guard `content_test.go` wholesale — it also holds
+`TestInfoReportsStampedProvenance`, which is tag-agnostic (it only sets the
+provenance vars and checks formatting) and should keep running in both states.
+Split instead: move `TestInfoReportsNotEmbedded` verbatim into a new
+`internal/content/content_notag_test.go` whose literal first line is
+`//go:build !embedcache`, and leave `content_test.go` unguarded.
+
+Then add the assertion that makes the tagged CI job worth running. Without it
+the job proves only that the package compiles: under the tag the surviving
+test files never call `Bundle()` or `Info()` at all, so a green run says
+nothing about the tagged behaviour.
+
+```go
+//go:build embedcache
+
+package content
+
+import (
+	"strings"
+	"testing"
+)
+
+// TestBundlePresentWithBuildTag is the tagged counterpart to
+// TestBundleAbsentWithoutBuildTag (source_test.go) and
+// TestInfoReportsNotEmbedded (content_notag_test.go): it proves the
+// -tags embedcache build actually carries and serves a bundle, not just
+// that it compiles. main_file_cache.dat and wordenc are present in both the
+// few-KB CI fixture bundle and a real rev-274 pack, so this test stays true
+// for a genuine release build too.
+func TestBundlePresentWithBuildTag(t *testing.T) {
+	fsys, ok := Bundle()
+	if !ok {
+		t.Fatal("Bundle() reported no bundle in a -tags embedcache build")
+	}
+	if fsys == nil {
+		t.Fatal("Bundle() returned ok=true with a nil FS")
+	}
+
+	for _, path := range []string{"pack/main_file_cache.dat", "raw/wordenc"} {
+		if _, err := fsys.Open(path); err != nil {
+			t.Errorf("Bundle() FS missing %q: %v", path, err)
+		}
+	}
+
+	got := Info()
+	if !strings.Contains(got, "embedded:  yes") {
+		t.Errorf("tagged build should report embedded: yes:\n%s", got)
+	}
+}
+```
+
+Re-run Step 3 to confirm both tag states pass. Verify the split with
+`go list -f '{{.TestGoFiles}}'` and `go list -tags embedcache -f '{{.TestGoFiles}}'`
+on `./internal/content/`: `content_test.go` must appear in BOTH, and each
+guarded file in exactly one. Run the tagged test **by name** — a test excluded
+by a build tag produces output identical to one that passed.
 
 - [ ] **Step 5: Commit**
 
