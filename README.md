@@ -13,14 +13,34 @@ This branch targets **wire-protocol revision 254** and is pinned to the
 project overview, see the
 [`main` branch README](https://github.com/zsrv/goscape-singleplayer/blob/main/README.md).
 
+## Downloads
+
+Released binaries for this revision embed the game content — download one,
+run it, and you are at the login screen. No cache to build, no goscape
+checkout, nothing else to install.
+
+    ./goscape-singleplayer
+
+The content is extracted once to `<data-dir>/content/` on first run; later
+starts reuse it. To see which Content revision a binary carries:
+
+    ./goscape-singleplayer -version
+
+To ignore the embedded content and use a cache you packed yourself, pass
+`--cache-dir` — it always wins over the embedded copy.
+
+**Building from source embeds nothing.** A plain `go build` produces a binary
+that needs `--cache-dir`, exactly as described below. Embedding is opt-in via
+`make embed-pack && make build-embedded`.
+
 ## Requirements
 
 - Go 1.26 or newer
 - **CGO** — the client links GLFW, OpenGL and ALSA. On Debian or Ubuntu, the
   system packages are the ones in
   [goscape-client's `apt-packages.txt`](https://github.com/zsrv/goscape-client/blob/main/.devcontainer/apt-packages.txt).
-- A packed revision 254 game cache (see below). This repository ships no game
-  assets.
+- A packed revision 254 game cache, **when building from source** (see
+  below). Release binaries carry one already — see [Downloads](#downloads).
 
 ## Build
 
@@ -33,10 +53,12 @@ builds without any other checkout present.
 
 ## The game cache
 
-You supply your own. In a [goscape](https://github.com/zsrv/goscape) checkout on
-the `rev-254` branch, `make pack` produces one; point `--cache-dir` at its
-output (default `./data/pack`). The launcher checks for `main_file_cache.dat`
-there and fails with an actionable message if the pack is missing.
+Building from source, you supply your own — release binaries carry one
+already; see [Downloads](#downloads). In a
+[goscape](https://github.com/zsrv/goscape) checkout on the `rev-254` branch,
+`make pack` produces one; point `--cache-dir` at its output (default
+`./data/pack`). The launcher checks for `main_file_cache.dat` there and fails
+with an actionable message if the pack is missing.
 
 The chat word filter (wordenc) is a separate raw jagfile on this revision, not
 part of the pack. `--wordenc-path` defaults to `<cache-dir>/../raw/wordenc`,
@@ -68,6 +90,7 @@ exits.
 | `--friends-port` | `2005` | internal friends gRPC port |
 | `--mem` | `high` | client memory mode: `high` or `low` |
 | `--world-type` | `members` | `members` or `free` |
+| `--version` | | print build and content provenance, then exit |
 
 The port flags exist for collisions only. **Every listener binds `127.0.0.1`
 and there is no flag to change that** — see [`SECURITY.md`](SECURITY.md) for
@@ -103,4 +126,4 @@ against local checkouts of both projects.
 
 MIT — see [LICENSE](LICENSE). This launcher combines two MIT-licensed projects
 derived from Lost City's work; [`NOTICE`](NOTICE) carries the attribution,
-including the note that no Jagex assets are distributed here.
+including the Jagex notice covering the game content release binaries embed.

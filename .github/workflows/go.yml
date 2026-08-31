@@ -12,6 +12,9 @@ on:
     branches: ['rev-*']
   pull_request:
     branches: ['rev-*']
+  # Called by release.yml so a tag build reuses this gate rather than
+  # duplicating it.
+  workflow_call:
 
 jobs:
   build-test:
@@ -49,3 +52,36 @@ jobs:
       # no game cache on the runner.
       - name: Format and vet
         run: test -z "$(gofmt -l .)" && CGO_ENABLED=1 go vet ./...
+
+  # The embedcache path would otherwise only ever be compiled during a
+  # release. This builds it on every push using a few-KB fixture bundle, so
+  # the //go:embed directive and the tagged code are gated without carrying a
+  # 39 MB pack in git.
+  build-embedded:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc pkg-config libffi-dev \
+            libgl-dev libgles-dev libegl-dev \
+            libx11-dev libx11-xcb-dev libxkbcommon-x11-dev \
+            libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev \
+            libxxf86vm-dev \
+            libasound2-dev
+
+      - name: Install the fixture bundle
+        run: make embed-pack-fixture
+
+      - name: Build with -tags embedcache
+        run: CGO_ENABLED=1 go build -trimpath -tags embedcache ./...
+
+      - name: Test with -tags embedcache
+        run: CGO_ENABLED=1 go test -tags embedcache ./...
