@@ -39,8 +39,8 @@ that needs `--cache-dir`, exactly as described below. Embedding is opt-in via
 - **CGO** — the client links GLFW, OpenGL and ALSA. On Debian or Ubuntu, the
   system packages are the ones in
   [goscape-client's `apt-packages.txt`](https://github.com/zsrv/goscape-client/blob/main/.devcontainer/apt-packages.txt).
-- A packed revision 274 game cache (see below). This repository ships no game
-  assets.
+- A packed revision 274 game cache, **when building from source** (see
+  below). Release binaries carry one already — see [Downloads](#downloads).
 
 ## Build
 
@@ -53,10 +53,12 @@ builds without any other checkout present.
 
 ## The game cache
 
-You supply your own. In a [goscape](https://github.com/zsrv/goscape) checkout on
-the `rev-274` branch, `make pack` produces one; point `--cache-dir` at its
-output (default `./data/pack`). The launcher checks for `main_file_cache.dat`
-there and fails with an actionable message if the pack is missing.
+Building from source, you supply your own — release binaries carry one
+already; see [Downloads](#downloads). In a
+[goscape](https://github.com/zsrv/goscape) checkout on the `rev-274` branch,
+`make pack` produces one; point `--cache-dir` at its output (default
+`./data/pack`). The launcher checks for `main_file_cache.dat` there and fails
+with an actionable message if the pack is missing.
 
 The chat word filter (wordenc) is a separate raw jagfile on this revision, not
 part of the pack. `--wordenc-path` defaults to `<cache-dir>/../raw/wordenc`,
