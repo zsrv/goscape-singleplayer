@@ -998,6 +998,10 @@ CMD   := ./cmd/goscape-singleplayer
 BUNDLE_DIR := internal/content/embedded/bundle
 PACK_DIR   := $(BUNDLE_DIR)/pack
 RAW_DIR    := $(BUNDLE_DIR)/raw
+# Written only after a pack fully succeeds, and deliberately a SIBLING of
+# bundle/: the embed directive is `all:bundle`, and the all: prefix would
+# otherwise sweep this marker into the embedded tree and the digest.
+MARKER     := internal/content/embedded/.bundle-complete
 
 CONTENT_REPO   := $(shell sed -n 's/^repo[[:space:]]*=[[:space:]]*//p' content.lock)
 CONTENT_BRANCH := $(shell sed -n 's/^branch[[:space:]]*=[[:space:]]*//p' content.lock)
@@ -1036,35 +1040,53 @@ build: ## build without embedded content (the default; needs --cache-dir at runt
 	CGO_ENABLED=1 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) $(CMD)
 
 build-embedded: ## build with the bundle in $(BUNDLE_DIR) embedded
-	@test -d $(PACK_DIR) || { echo "no bundle at $(BUNDLE_DIR); run 'make embed-pack' first" >&2; exit 1; }
+	@test -f $(MARKER) || { echo "no complete bundle at $(BUNDLE_DIR); run 'make embed-pack' first" >&2; exit 1; }
 	CGO_ENABLED=1 go build -trimpath -tags embedcache \
 	    -ldflags "$(LDFLAGS) -X $(CPREFIX).PackDigest=$(PACK_DIGEST)" -o $(BIN) $(CMD)
 
 embed-pack: ## pack the pinned Content revision into $(BUNDLE_DIR)
 	@test -n "$(CONTENT_COMMIT)" || { echo "content.lock: no commit pinned" >&2; exit 1; }
+	rm -f $(MARKER)
 	rm -rf $(BUNDLE_DIR)
 	mkdir -p $(PACK_DIR) $(RAW_DIR)
-	$(eval WORK := $(shell mktemp -d))
+# One shell, so the trap can remove the clone on EVERY exit path. Make runs
+# each recipe line in its own shell and aborts at the first failure, so a
+# trailing `rm -rf` is only reached when nothing went wrong.
+	set -euo pipefail; \
+	WORK=$$(mktemp -d); \
+	trap 'rm -rf "$$WORK"' EXIT; \
 	git clone --filter=blob:none --no-checkout \
-	    https://github.com/$(CONTENT_REPO).git $(WORK)
-	git -C $(WORK) checkout --detach $(CONTENT_COMMIT)
-	$(eval GOSCAPE_RAW := $(shell go list -m -f '{{.Dir}}' github.com/zsrv/goscape)/data/raw)
+	    https://github.com/$(CONTENT_REPO).git "$$WORK"; \
+	git -C "$$WORK" checkout --detach $(CONTENT_COMMIT); \
+	GOSCAPE_RAW=$$(go list -m -f '{{.Dir}}' github.com/zsrv/goscape)/data/raw; \
 	CGO_ENABLED=0 go run github.com/zsrv/goscape/cmd/goscape-cli pack \
-	    --src-dir $(WORK) --out-dir $(PACK_DIR) --raw-dir $(GOSCAPE_RAW)
-	install -m 0644 $(GOSCAPE_RAW)/wordenc $(RAW_DIR)/wordenc
-	rm -rf $(WORK)
+	    --src-dir "$$WORK" --out-dir $(PACK_DIR) --raw-dir "$$GOSCAPE_RAW"; \
+	install -m 0644 "$$GOSCAPE_RAW"/wordenc $(RAW_DIR)/wordenc
+	touch $(MARKER)
 	@echo "bundle ready: $$(du -sh $(BUNDLE_DIR) | cut -f1), digest $(PACK_DIGEST)"
 
 embed-pack-fixture: ## install the tiny CI fixture as the bundle
+	rm -f $(MARKER)
 	rm -rf $(BUNDLE_DIR)
 	mkdir -p $(BUNDLE_DIR)
 	cp -R internal/content/testdata/fixturebundle/. $(BUNDLE_DIR)/
+	touch $(MARKER)
 
 test: ## run the test suite
 	CGO_ENABLED=1 go test ./...
 
 clean: ## remove build output and the generated bundle
-	rm -rf $(BIN) $(BUNDLE_DIR)
+	rm -rf $(BIN) $(BUNDLE_DIR) $(MARKER)
+```
+
+The `.gitignore` gains the marker alongside the bundle entry from Task 2:
+
+```
+# Written by `make embed-pack` only after a pack fully succeeds; `make
+# build-embedded` refuses to build without it. A sibling of bundle/ rather
+# than a file inside it, because the `all:` embed prefix would otherwise
+# bake the marker into the shipped tree.
+/internal/content/embedded/.bundle-complete
 ```
 
 Note on `--raw-dir`: this branch is rev-274, where wordenc comes from the goscape module. **On rev-225 the `--raw-dir` argument and the `install` line are both dropped**, because that revision's packer compiles wordenc from Content's own `wordenc/*.txt` into `pack/client/wordenc`.
