@@ -1061,7 +1061,7 @@ build-embedded: ## build with the bundle in $(BUNDLE_DIR) embedded
 embed-pack: ## pack the pinned Content revision into $(BUNDLE_DIR)
 	@test -n "$(CONTENT_COMMIT)" || { echo "content.lock: no commit pinned" >&2; exit 1; }
 	@test -n "$(ENGINE_COMMIT)" || { echo "content.lock: no engine commit pinned" >&2; exit 1; }
-	@command -v bun >/dev/null || { echo "bun is required: Engine-TS generates the pack/*.pack ID indexes that Content gitignores and the goscape packer only reads. See https://bun.sh" >&2; exit 1; }
+	@command -v npm >/dev/null || { echo "npm is required: Engine-TS generates the pack/*.pack ID indexes that Content gitignores and the goscape packer only reads" >&2; exit 1; }
 	rm -f $(MARKER)
 	rm -rf $(BUNDLE_DIR)
 	mkdir -p $(PACK_DIR) $(RAW_DIR)
@@ -1080,8 +1080,8 @@ embed-pack: ## pack the pinned Content revision into $(BUNDLE_DIR)
 	git clone --filter=blob:none --no-checkout \
 	    https://github.com/$(ENGINE_REPO).git "$$ENGINE"; \
 	git -C "$$ENGINE" checkout --detach $(ENGINE_COMMIT); \
-	( cd "$$ENGINE" && bun install --frozen-lockfile && \
-	  BUILD_SRC_DIR="$$SRC" bun run tools/pack/Build.ts ); \
+	( cd "$$ENGINE" && npm ci --no-audit --no-fund && \
+	  BUILD_SRC_DIR="$$SRC" npm run build ); \
 	test -s "$$SRC/pack/param.pack" || \
 	  { echo "engine build wrote no pack/param.pack — the goscape packer cannot resolve struct params without it" >&2; exit 1; }; \
 	GOSCAPE_RAW=$$(go list -m -f '{{.Dir}}' github.com/zsrv/goscape)/data/raw; \
@@ -1553,18 +1553,14 @@ jobs:
       # the pack fails with an opaque "invalid property value" on the first
       # struct param it cannot resolve.
       #
-      # Bun is installed from npm via the first-party setup-node action rather
-      # than a third-party setup-bun action: this workflow deliberately carries
-      # no third-party actions, and a mutable action tag in a release pipeline
-      # is exactly the supply-chain exposure that posture exists to avoid.
-      # Engine-TS ships only bun.lock, so Bun is also the only runtime that can
-      # install its dependencies from a frozen lockfile.
+      # At the pinned Engine-TS commit the repo ships package-lock.json and a
+      # plain `build` script (tsx tools/pack/Build.ts), so npm ci reproduces
+      # its dependencies exactly and setup-node is the only toolchain action
+      # needed. Later Engine-TS commits switch to bun.lock and rename the
+      # script to node:build — another reason the engine pin is not optional.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Install Bun
-        run: npm install -g bun@1.2.20
 
       - name: Pack the pinned Content revision
         run: make embed-pack

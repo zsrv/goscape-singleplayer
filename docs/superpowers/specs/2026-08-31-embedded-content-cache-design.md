@@ -125,7 +125,7 @@ git -C "$W" checkout "$COMMIT"
 # Generate the server-only pack indexes into $W/pack/ — Content ships none.
 git clone --filter=blob:none https://github.com/LostCityRS/Engine-TS "$E"
 git -C "$E" checkout "$ENGINE_COMMIT"
-(cd "$E" && bun install --frozen-lockfile && BUILD_SRC_DIR="$W" bun run tools/pack/Build.ts)
+(cd "$E" && npm ci && BUILD_SRC_DIR="$W" npm run build)
 
 RAW=$(go list -m -f '{{.Dir}}' github.com/zsrv/goscape)/data/raw   # rev-244+ only
 go run github.com/zsrv/goscape/cmd/goscape-cli pack \
@@ -160,8 +160,8 @@ transmitted packs only when `BUILD_VERIFY` is off. Transmitted packs — `obj`,
 baked into the client cache and must stay stable.
 
 So the pipeline needs an Engine-TS build step before the goscape packer, and
-`content.lock` gains a matching engine pin. `bun run tools/pack/Build.ts` is
-the supported entry point; it does more work than we need (it builds its own
+`content.lock` gains a matching engine pin. `npm run build` (which runs
+`tsx tools/pack/Build.ts`) is the supported entry point; it does more work than we need (it builds its own
 cache too) but generating the indexes is the side effect we depend on, and
 there is no narrower supported entry.
 
@@ -336,7 +336,7 @@ the matrix:
 gate ──> pack (ubuntu) ──────────────> build matrix (5 native runners) ──> release
            1. checkout Content @ pin        └── downloads bundle,
            2. checkout Engine-TS @ pin          builds -tags embedcache
-           3. bun install + Build.ts
+           3. npm ci + npm run build
               (generates pack/*.pack)
            4. goscape-cli pack
            5. uploads bundle/ ───────────┘
@@ -349,13 +349,24 @@ are a Bun toolchain and an Engine-TS checkout pinned by `content.lock`'s
 indexes into the Content clone. Only step 4's output is uploaded — Engine-TS's
 own cache output is discarded.
 
-Bun is required rather than Node because Engine-TS ships only `bun.lock`; a
-Node path would resolve its dependencies unpinned on every run, which a
-release pipeline cannot accept. It is installed from npm through the
-first-party `actions/setup-node`, **not** a third-party `setup-bun` action —
-this workflow deliberately carries no third-party actions, for the same reason
-the release step uses the preinstalled `gh` CLI instead of
-`softprops/action-gh-release`.
+Node, not Bun. At the pinned Engine-TS commit the repository ships a
+`package-lock.json` and a plain `"build": "tsx tools/pack/Build.ts"` script, so
+`npm ci` reproduces its dependency tree exactly and the first-party
+`actions/setup-node` is the only toolchain action needed — this workflow
+deliberately carries no third-party actions, for the same reason the release
+step uses the preinstalled `gh` CLI instead of `softprops/action-gh-release`.
+
+This is itself an argument for pinning the engine: **later** Engine-TS commits
+replace `package-lock.json` with `bun.lock` and rename the script to
+`node:build`, so a floating `274` branch would silently break the step. The
+pin fixes both the lockfile format and the script name.
+
+**Verified end to end** on 2026-08-31 against the pinned trio: a bare Content
+clone carries 19 of the 30 index files; `npm ci && npm run build` took ~9 s and
+produced all 30 with `pyre_level` present; `goscape-cli pack` then succeeded,
+emitting the expected 39 MB `client/` + `server/` + `main_file_cache.*` +
+`mapview/` tree. Both the engine and the packer emit the same three benign
+`missing model` warnings.
 
 Packing runs the RuneScript compiler; inside the matrix it would run five
 times. Packing once also guarantees all five platforms embed a byte-identical
