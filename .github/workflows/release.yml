@@ -30,8 +30,22 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Go is the whole toolchain: the packer generates the server-only
+      # pack/*.pack ID indexes itself, so a bare Content clone is enough.
       - name: Pack the pinned Content revision
         run: make embed-pack
+
+      # Cheap guard that the config families actually packed. Index generation
+      # lives in goscape and has its own tests, but a tree whose indexes never
+      # materialised degrades into a confusing packer error rather than an
+      # obvious one, so fail here with a clear message instead.
+      - name: Verify the pack is complete
+        run: |
+          set -euo pipefail
+          if [ ! -s internal/content/embedded/bundle/pack/server/param.dat ]; then
+            echo "packed param.dat missing or empty — the config pack did not run" >&2
+            exit 1
+          fi
 
       - id: digest
         name: Record the bundle digest

@@ -65,6 +65,9 @@ embed-pack: ## pack the pinned Content revision into $(BUNDLE_DIR)
 	rm -f $(MARKER)
 	rm -rf $(BUNDLE_DIR)
 	mkdir -p $(PACK_DIR) $(RAW_DIR)
+# One shell, so the trap can remove the clone on EVERY exit path. Make runs
+# each recipe line in its own shell and aborts at the first failure, so a
+# trailing `rm -rf` is only reached when nothing went wrong.
 	set -euo pipefail; \
 	WORK=$$(mktemp -d); \
 	trap 'rm -rf "$$WORK"' EXIT; \
