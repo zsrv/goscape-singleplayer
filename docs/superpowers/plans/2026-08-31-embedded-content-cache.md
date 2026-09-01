@@ -990,6 +990,12 @@ branch = 274
 commit = 2b62ae68dfed02b441bae47987a01d6bcbaeb358
 ```
 
+Content gitignores fourteen `pack/*.pack` ID indexes ("generated for the
+server only"), so a bare clone carries 19 of 30. goscape generates the missing
+ones itself as of the *Pack ID index generation* change on each revision
+branch, so no second pin and no Node toolchain are needed here — but the
+goscape pin in `go.mod` must be at or after that commit.
+
 - [ ] **Step 2: Write the Makefile**
 
 ```make
@@ -1525,8 +1531,22 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Go is the whole toolchain: the packer generates the server-only
+      # pack/*.pack ID indexes itself, so a bare Content clone is enough.
       - name: Pack the pinned Content revision
         run: make embed-pack
+
+      # Cheap guard that the config families actually packed. Index generation
+      # lives in goscape and has its own tests, but a tree whose indexes never
+      # materialised degrades into a confusing packer error rather than an
+      # obvious one, so fail here with a clear message instead.
+      - name: Verify the pack is complete
+        run: |
+          set -euo pipefail
+          if [ ! -s internal/content/embedded/bundle/pack/server/param.dat ]; then
+            echo "packed param.dat missing or empty — the config pack did not run" >&2
+            exit 1
+          fi
 
       - id: digest
         name: Record the bundle digest
@@ -1740,5 +1760,25 @@ interpolation, matching goscape-client's release workflow."
 **Type consistency.** `Bundle() (fs.FS, bool)` is defined in Task 2 and consumed unchanged in Tasks 4 and 5. `EnsureExtracted(src fs.FS, dir, digest string) error` and `StampName` are defined in Task 3 and consumed in Task 4's `ResolveCacheDir` and its tests. `build.Info()` (Task 1) and `content.Info()` (Task 4) are both consumed by main's `-version` handler. The ldflags paths in Task 5's Makefile and Task 8's workflow both target `internal/build` and `internal/content` package variables that Tasks 1 and 4 actually declare: `Version`, `Revision`, `Branch`, `BuildUser`, `BuildDate`, `Repo`, `Branch`, `Commit`, `PackDigest`.
 
 **Known ordering hazard.** Task 6 Step 2 discovers that `TestBundleAbsentWithoutBuildTag` (Task 2) fails under `-tags embedcache`; Step 3 fixes it with a `//go:build !embedcache` guard. This is deliberate — the failure is worth seeing rather than pre-empting, because it demonstrates that the tagged and untagged builds really are different programs.
+
+**Backport note — goscape pin.** No engine pin is needed: goscape generates
+Content's gitignored ID indexes itself. Each branch must pin a goscape at or
+after its *Pack ID index generation* commit, though — an older pin fails with
+the opaque `invalid property value` this design exists to avoid. Those commits,
+as they stand locally before the publish-time timestamp rewrite (which changes
+every SHA — match by subject, not by hash, once published):
+
+| Branch | goscape commit | Verified against Content |
+|---|---|---|
+| rev-274 | `47eb0ed7` | `2b62ae68` — 19 → 30 indexes, 39 MB |
+| rev-254 | `7f79cb6c` | `caee3f2e` — 19 → 30 indexes, 41 MB |
+| rev-245.2 | `f7efb7ac` | `cbcfe670` — 18 → 29 indexes, 38 MB |
+| rev-244 | `d0a19db9` | `e5d0282e` — 18 → 29 indexes, 37 MB |
+| rev-225 | `2e7716ff` | `9901aa27` — 15 → 26 indexes, 27 MB |
+
+rev-225 and rev-244/245.2 carry deviation `PIG-D3`: those pins predate the
+transmitted/non-transmitted split in goscape's `readAndValidate`, so index
+generation lives entirely in `generateConfigPackIndexes` there. It makes no
+difference to this pipeline.
 
 **Backport note.** Only `Makefile` (the `--raw-dir` argument and the `install` of wordenc) and `internal/content/testdata/fixturebundle/` differ on rev-225, whose packer compiles wordenc from Content's own sources into `pack/client/wordenc`. Everything else backports unchanged.

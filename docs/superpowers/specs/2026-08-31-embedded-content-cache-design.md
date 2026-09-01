@@ -113,11 +113,57 @@ commit = 2b62ae68dfed02b441bae47987a01d6bcbaeb358
 ```bash
 git clone --filter=blob:none https://github.com/LostCityRS/Content "$W"
 git -C "$W" checkout "$COMMIT"
+
 RAW=$(go list -m -f '{{.Dir}}' github.com/zsrv/goscape)/data/raw   # rev-244+ only
 go run github.com/zsrv/goscape/cmd/goscape-cli pack \
     --src-dir "$W" --out-dir internal/content/embedded/bundle/pack --raw-dir "$RAW"
 install -m 0644 "$RAW/wordenc" internal/content/embedded/bundle/raw/wordenc
 ```
+
+### The generated pack indexes
+
+Content's `pack/*.pack` files map config names to numeric IDs. **Fourteen of
+them are gitignored** — Content's own `.gitignore` explains why: "since these
+are generated for the server only, we don't have to share them". The list
+includes `param.pack`, `struct.pack`, `enum.pack`, `category.pack`,
+`hunt.pack`, `dbtable.pack`, `dbrow.pack`, `mesanim.pack`, `varn.pack`,
+`vars.pack` and `script.pack`. A `git clone` of Content therefore contains 19
+index files, not 30.
+
+**goscape used to read these and never write them.** `pack.PackFile` had
+`Register` and `Save`, but nothing in the pack pipeline called either, so a
+bare clone could not be packed. The failure was hard to read: when a name is
+absent from `param.pack`, `parseStructConfigFor` fails its
+`paramTypes.ConfigNames[name]` lookup, and `read_typed.go` reports the generic
+`invalid property value in <file>: param=<name>,<value>` while **discarding
+the underlying `unknown param` error** — so an `int` param assigned `5`
+appears to fail value-parsing when it never reached parsing at all.
+
+An earlier draft of this design worked around that by pinning Engine-TS
+alongside Content and running `npm ci && npm run build` to write the indexes
+before packing. **That is no longer needed: goscape generates them itself.**
+The register-and-save half of TS `tools/pack/PackFile.ts:validateConfigPack`,
+plus `regenScriptPack` and `validateCategoryPack`, are ported into
+`pkg/pack` — see goscape's `docs/PORTING.md` under *Pack ID index generation*.
+Transmitted packs (`obj`, `loc`, `npc`, `seq`) are deliberately never
+auto-assigned, because their IDs are baked into the client cache and must stay
+stable. Every generated index is byte-identical to the one Engine-TS produces
+from the same content commit.
+
+So `content.lock` carries one pin, `make embed-pack` is a single
+`goscape-cli pack` against a bare Content clone, and the pipeline needs no
+Node toolchain and no second checkout. This requires a goscape pin at or after
+the commit that added generation on each revision branch.
+
+**On reproducibility.** Auto-assigned IDs depend on crawl order and on
+whatever the index already contained. CI always starts from a fresh clone with
+no server-only indexes, so a given content commit yields the same assignment
+every time and a tag still rebuilds byte-identically. A *developer's* tree is
+different: an existing stale index is appended to rather than rebuilt, so
+local IDs can diverge from CI's. `make embed-pack` therefore clones into a
+temp directory rather than reusing a working checkout, and a bundle built
+locally is not guaranteed to match one built by CI. Only CI's output is
+published.
 
 Verified: `go run github.com/zsrv/goscape/cmd/goscape-cli` resolves from this
 module, because `goscape` is already a dependency and `cmd/goscape-cli` is a
@@ -277,14 +323,32 @@ One structural difference from the client's workflow — a `pack` job upstream o
 the matrix:
 
 ```
-gate ──> pack (ubuntu, CGO off) ──> build matrix (5 native runners) ──> release
-              └── uploads pack/ ────┘ downloads it, builds -tags embedcache
+gate ──> pack (ubuntu) ──────────────> build matrix (5 native runners) ──> release
+           1. checkout Content @ pin        └── downloads bundle,
+           2. goscape-cli pack                  builds -tags embedcache
+           3. uploads bundle/ ───────────┘
 ```
+
+The pack job needs no toolchain beyond Go: the packer generates the
+server-only `pack/*.pack` indexes itself (see *The generated pack indexes*),
+so a bare Content clone is enough. Like every other job here it carries no
+third-party actions, for the same reason the release step uses the
+preinstalled `gh` CLI instead of `softprops/action-gh-release`.
+
+**Verified end to end** on 2026-08-31: a bare Content clone at the pinned
+commit carries 19 of the 30 index files; `goscape-cli pack` writes the missing
+11 and succeeds, emitting the expected 39 MB `client/` + `server/` +
+`main_file_cache.*` + `mapview/` tree with three benign `missing model`
+warnings. The same red-to-green check was run on each of the five revision
+branches against its own pinned content commit.
 
 Packing runs the RuneScript compiler; inside the matrix it would run five
 times. Packing once also guarantees all five platforms embed a byte-identical
 cache, so `PackDigest` is identical across targets — which matters, because
-that digest is what `-version` invites users to compare.
+that digest is what `-version` invites users to compare. The index generation
+must likewise happen exactly once, upstream of the matrix: run per-target it
+could assign different IDs on different runners and silently produce five
+divergent caches.
 
 Link-time values follow the client's approach, including its security posture:
 untrusted input reaches `run:` steps through env, never string interpolation.
@@ -306,6 +370,12 @@ FS, so no large fixture is needed:
 | precedence | table test over explicit/default `--cache-dir` × embedded/not |
 | provenance rendering | embedded and non-embedded forms |
 
+A pack-pipeline check belongs here too, and did not exist before: after
+packing, assert that the packed `server/param.dat` is non-empty. Index
+generation now lives in goscape and is covered by its own tests, but this
+pipeline should still fail loudly rather than publish a bundle packed from a
+tree whose indexes never materialised.
+
 Build coverage needs deliberate care: without it, the `embedcache` path would
 only ever compile during a release. CI gains a second build job running
 `make embed-pack-fixture`, which copies `internal/content/testdata/fixturebundle/`
@@ -315,8 +385,10 @@ code compiles.
 
 ## Out of scope
 
-- Any change to goscape or goscape-client, including the `/maps/` hardcoded
-  path bug and the `fs.FS` port.
+- Any further change to goscape or goscape-client, including the `/maps/`
+  hardcoded path bug and the `fs.FS` port. (Pack ID index generation was
+  added to goscape rather than worked around here; that is a prerequisite of
+  this design, not part of its scope.)
 - A slim (cache-less) release artifact. Source builds cover that audience.
 - Hot-reloading embedded content. The extracted tree is derived data; changing
   content means a new binary or `--cache-dir`.
