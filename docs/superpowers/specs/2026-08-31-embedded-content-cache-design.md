@@ -103,29 +103,16 @@ since that revision's packer compiles wordenc into `pack/client/wordenc`.
 ## content.lock and the pack pipeline
 
 ```
-repo          = LostCityRS/Content
-branch        = 274
-commit        = 2b62ae68dfed02b441bae47987a01d6bcbaeb358
-engine_repo   = LostCityRS/Engine-TS
-engine_branch = 274
-engine_commit = 1d25566cb53e7af1b1cb18ade8af996316c19614
+repo   = LostCityRS/Content
+branch = 274
+commit = 2b62ae68dfed02b441bae47987a01d6bcbaeb358
 ```
-
-The second pin exists because Content alone is not packable — see *The
-generated pack indexes* below. Engine-TS `274` at `1d25566c` is the revision
-goscape's own porting spec names as its sync target, so the three pins
-describe one coherent revision.
 
 `make embed-pack` reads it and runs, with no goscape checkout:
 
 ```bash
 git clone --filter=blob:none https://github.com/LostCityRS/Content "$W"
 git -C "$W" checkout "$COMMIT"
-
-# Generate the server-only pack indexes into $W/pack/ — Content ships none.
-git clone --filter=blob:none https://github.com/LostCityRS/Engine-TS "$E"
-git -C "$E" checkout "$ENGINE_COMMIT"
-(cd "$E" && npm ci && BUILD_SRC_DIR="$W" npm run build)
 
 RAW=$(go list -m -f '{{.Dir}}' github.com/zsrv/goscape)/data/raw   # rev-244+ only
 go run github.com/zsrv/goscape/cmd/goscape-cli pack \
@@ -143,27 +130,30 @@ includes `param.pack`, `struct.pack`, `enum.pack`, `category.pack`,
 `vars.pack` and `script.pack`. A `git clone` of Content therefore contains 19
 index files, not 30.
 
-**goscape reads these and never writes them.** `pack.PackFile` has `Register`
-and `Save`, but nothing in the pack pipeline calls either. When a name is
+**goscape used to read these and never write them.** `pack.PackFile` had
+`Register` and `Save`, but nothing in the pack pipeline called either, so a
+bare clone could not be packed. The failure was hard to read: when a name is
 absent from `param.pack`, `parseStructConfigFor` fails its
-`paramTypes.ConfigNames[name]` lookup; `read_typed.go` then reports the
-generic `invalid property value in <file>: param=<name>,<value>` and
-**discards the underlying `unknown param` error**, which is what makes this
-failure so hard to read — an `int` param assigned `5` appears to fail
-value-parsing when it never reached parsing at all.
+`paramTypes.ConfigNames[name]` lookup, and `read_typed.go` reports the generic
+`invalid property value in <file>: param=<name>,<value>` while **discarding
+the underlying `unknown param` error** — so an `int` param assigned `5`
+appears to fail value-parsing when it never reached parsing at all.
 
-**Engine-TS generates them.** `tools/pack/PackFile.ts:validateConfigPack`
-crawls the config names, registers any it has not seen with `pack.max++`, and
-calls `pack.save()`. That auto-assignment runs for server-only packs, and for
-transmitted packs only when `BUILD_VERIFY` is off. Transmitted packs — `obj`,
-`loc`, `npc`, `seq` — still require hand-assigned IDs, because those IDs are
-baked into the client cache and must stay stable.
+An earlier draft of this design worked around that by pinning Engine-TS
+alongside Content and running `npm ci && npm run build` to write the indexes
+before packing. **That is no longer needed: goscape generates them itself.**
+The register-and-save half of TS `tools/pack/PackFile.ts:validateConfigPack`,
+plus `regenScriptPack` and `validateCategoryPack`, are ported into
+`pkg/pack` — see goscape's `docs/PORTING.md` under *Pack ID index generation*.
+Transmitted packs (`obj`, `loc`, `npc`, `seq`) are deliberately never
+auto-assigned, because their IDs are baked into the client cache and must stay
+stable. Every generated index is byte-identical to the one Engine-TS produces
+from the same content commit.
 
-So the pipeline needs an Engine-TS build step before the goscape packer, and
-`content.lock` gains a matching engine pin. `npm run build` (which runs
-`tsx tools/pack/Build.ts`) is the supported entry point; it does more work than we need (it builds its own
-cache too) but generating the indexes is the side effect we depend on, and
-there is no narrower supported entry.
+So `content.lock` carries one pin, `make embed-pack` is a single
+`goscape-cli pack` against a bare Content clone, and the pipeline needs no
+Node toolchain and no second checkout. This requires a goscape pin at or after
+the commit that added generation on each revision branch.
 
 **On reproducibility.** Auto-assigned IDs depend on crawl order and on
 whatever the index already contained. CI always starts from a fresh clone with
@@ -335,38 +325,22 @@ the matrix:
 ```
 gate ──> pack (ubuntu) ──────────────> build matrix (5 native runners) ──> release
            1. checkout Content @ pin        └── downloads bundle,
-           2. checkout Engine-TS @ pin          builds -tags embedcache
-           3. npm ci + npm run build
-              (generates pack/*.pack)
-           4. goscape-cli pack
-           5. uploads bundle/ ───────────┘
+           2. goscape-cli pack                  builds -tags embedcache
+           3. uploads bundle/ ───────────┘
 ```
 
-The pack job has five steps rather than one, because the goscape packer cannot
-run against a bare Content clone (see *The generated pack indexes*). Steps 2-3
-are a Bun toolchain and an Engine-TS checkout pinned by `content.lock`'s
-`engine_*` fields; they exist solely to write the server-only `pack/*.pack`
-indexes into the Content clone. Only step 4's output is uploaded — Engine-TS's
-own cache output is discarded.
+The pack job needs no toolchain beyond Go: the packer generates the
+server-only `pack/*.pack` indexes itself (see *The generated pack indexes*),
+so a bare Content clone is enough. Like every other job here it carries no
+third-party actions, for the same reason the release step uses the
+preinstalled `gh` CLI instead of `softprops/action-gh-release`.
 
-Node, not Bun. At the pinned Engine-TS commit the repository ships a
-`package-lock.json` and a plain `"build": "tsx tools/pack/Build.ts"` script, so
-`npm ci` reproduces its dependency tree exactly and the first-party
-`actions/setup-node` is the only toolchain action needed — this workflow
-deliberately carries no third-party actions, for the same reason the release
-step uses the preinstalled `gh` CLI instead of `softprops/action-gh-release`.
-
-This is itself an argument for pinning the engine: **later** Engine-TS commits
-replace `package-lock.json` with `bun.lock` and rename the script to
-`node:build`, so a floating `274` branch would silently break the step. The
-pin fixes both the lockfile format and the script name.
-
-**Verified end to end** on 2026-08-31 against the pinned trio: a bare Content
-clone carries 19 of the 30 index files; `npm ci && npm run build` took ~9 s and
-produced all 30 with `pyre_level` present; `goscape-cli pack` then succeeded,
-emitting the expected 39 MB `client/` + `server/` + `main_file_cache.*` +
-`mapview/` tree. Both the engine and the packer emit the same three benign
-`missing model` warnings.
+**Verified end to end** on 2026-08-31: a bare Content clone at the pinned
+commit carries 19 of the 30 index files; `goscape-cli pack` writes the missing
+11 and succeeds, emitting the expected 39 MB `client/` + `server/` +
+`main_file_cache.*` + `mapview/` tree with three benign `missing model`
+warnings. The same red-to-green check was run on each of the five revision
+branches against its own pinned content commit.
 
 Packing runs the RuneScript compiler; inside the matrix it would run five
 times. Packing once also guarantees all five platforms embed a byte-identical
@@ -396,11 +370,11 @@ FS, so no large fixture is needed:
 | precedence | table test over explicit/default `--cache-dir` × embedded/not |
 | provenance rendering | embedded and non-embedded forms |
 
-A pack-pipeline check belongs here too, and did not exist before: after the
-index-generation step, assert that `pack/param.pack` in the clone contains a
-name that only the pinned content revision introduces. Without it, a silently
-skipped Engine-TS build degrades into the same opaque `invalid property value`
-failure this design exists to avoid.
+A pack-pipeline check belongs here too, and did not exist before: after
+packing, assert that the packed `server/param.dat` is non-empty. Index
+generation now lives in goscape and is covered by its own tests, but this
+pipeline should still fail loudly rather than publish a bundle packed from a
+tree whose indexes never materialised.
 
 Build coverage needs deliberate care: without it, the `embedcache` path would
 only ever compile during a release. CI gains a second build job running
@@ -411,8 +385,10 @@ code compiles.
 
 ## Out of scope
 
-- Any change to goscape or goscape-client, including the `/maps/` hardcoded
-  path bug and the `fs.FS` port.
+- Any further change to goscape or goscape-client, including the `/maps/`
+  hardcoded path bug and the `fs.FS` port. (Pack ID index generation was
+  added to goscape rather than worked around here; that is a prerequisite of
+  this design, not part of its scope.)
 - A slim (cache-less) release artifact. Source builds cover that audience.
 - Hot-reloading embedded content. The extracted tree is derived data; changing
   content means a new binary or `--cache-dir`.
