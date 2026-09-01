@@ -6,14 +6,14 @@
 
 **Architecture:** A build tag (`embedcache`) gates an `//go:embed` of a bundle produced by the goscape packer that ships inside the pinned goscape module. At startup the bundle is extracted to `<data-dir>/content/`, guarded by a build-time digest so warm starts cost an O(1) string compare. Provenance is injected at link time and printed by a new `-version` flag.
 
-**Tech Stack:** Go 1.26, `embed`, `io/fs`, `testing/fstest`, GNU Make, GitHub Actions.
+**Tech Stack:** Go 1.27, `embed`, `io/fs`, `testing/fstest`, GNU Make, GitHub Actions.
 
 **Spec:** `docs/superpowers/specs/2026-08-31-embedded-content-cache-design.md`
 
 ## Global Constraints
 
 - Branch: `rev-274` only. Backports to rev-254, rev-245.2, rev-244, rev-225 follow in a separate pass.
-- Go 1.26 or newer; CGO required for any build of `./cmd/...` (GLFW/OpenGL/ALSA).
+- Go 1.27 or newer; CGO required for any build of `./cmd/...` (GLFW/OpenGL/ALSA).
 - No changes to `goscape` or `goscape-client`. Both stay pinned as they are.
 - Every commit must leave `gofmt -l .` empty and `go vet ./...` clean.
 - Default `go build` must never reference the embedded bundle, and must behave exactly as it does today.
