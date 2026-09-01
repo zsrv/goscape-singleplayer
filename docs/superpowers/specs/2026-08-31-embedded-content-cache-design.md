@@ -103,21 +103,77 @@ since that revision's packer compiles wordenc into `pack/client/wordenc`.
 ## content.lock and the pack pipeline
 
 ```
-repo   = LostCityRS/Content
-branch = 274
-commit = 2b62ae68dfed02b441bae47987a01d6bcbaeb358
+repo          = LostCityRS/Content
+branch        = 274
+commit        = 2b62ae68dfed02b441bae47987a01d6bcbaeb358
+engine_repo   = LostCityRS/Engine-TS
+engine_branch = 274
+engine_commit = 1d25566cb53e7af1b1cb18ade8af996316c19614
 ```
+
+The second pin exists because Content alone is not packable — see *The
+generated pack indexes* below. Engine-TS `274` at `1d25566c` is the revision
+goscape's own porting spec names as its sync target, so the three pins
+describe one coherent revision.
 
 `make embed-pack` reads it and runs, with no goscape checkout:
 
 ```bash
 git clone --filter=blob:none https://github.com/LostCityRS/Content "$W"
 git -C "$W" checkout "$COMMIT"
+
+# Generate the server-only pack indexes into $W/pack/ — Content ships none.
+git clone --filter=blob:none https://github.com/LostCityRS/Engine-TS "$E"
+git -C "$E" checkout "$ENGINE_COMMIT"
+(cd "$E" && bun install --frozen-lockfile && BUILD_SRC_DIR="$W" bun run tools/pack/Build.ts)
+
 RAW=$(go list -m -f '{{.Dir}}' github.com/zsrv/goscape)/data/raw   # rev-244+ only
 go run github.com/zsrv/goscape/cmd/goscape-cli pack \
     --src-dir "$W" --out-dir internal/content/embedded/bundle/pack --raw-dir "$RAW"
 install -m 0644 "$RAW/wordenc" internal/content/embedded/bundle/raw/wordenc
 ```
+
+### The generated pack indexes
+
+Content's `pack/*.pack` files map config names to numeric IDs. **Fourteen of
+them are gitignored** — Content's own `.gitignore` explains why: "since these
+are generated for the server only, we don't have to share them". The list
+includes `param.pack`, `struct.pack`, `enum.pack`, `category.pack`,
+`hunt.pack`, `dbtable.pack`, `dbrow.pack`, `mesanim.pack`, `varn.pack`,
+`vars.pack` and `script.pack`. A `git clone` of Content therefore contains 19
+index files, not 30.
+
+**goscape reads these and never writes them.** `pack.PackFile` has `Register`
+and `Save`, but nothing in the pack pipeline calls either. When a name is
+absent from `param.pack`, `parseStructConfigFor` fails its
+`paramTypes.ConfigNames[name]` lookup; `read_typed.go` then reports the
+generic `invalid property value in <file>: param=<name>,<value>` and
+**discards the underlying `unknown param` error**, which is what makes this
+failure so hard to read — an `int` param assigned `5` appears to fail
+value-parsing when it never reached parsing at all.
+
+**Engine-TS generates them.** `tools/pack/PackFile.ts:validateConfigPack`
+crawls the config names, registers any it has not seen with `pack.max++`, and
+calls `pack.save()`. That auto-assignment runs for server-only packs, and for
+transmitted packs only when `BUILD_VERIFY` is off. Transmitted packs — `obj`,
+`loc`, `npc`, `seq` — still require hand-assigned IDs, because those IDs are
+baked into the client cache and must stay stable.
+
+So the pipeline needs an Engine-TS build step before the goscape packer, and
+`content.lock` gains a matching engine pin. `bun run tools/pack/Build.ts` is
+the supported entry point; it does more work than we need (it builds its own
+cache too) but generating the indexes is the side effect we depend on, and
+there is no narrower supported entry.
+
+**On reproducibility.** Auto-assigned IDs depend on crawl order and on
+whatever the index already contained. CI always starts from a fresh clone with
+no server-only indexes, so a given content commit yields the same assignment
+every time and a tag still rebuilds byte-identically. A *developer's* tree is
+different: an existing stale index is appended to rather than rebuilt, so
+local IDs can diverge from CI's. `make embed-pack` therefore clones into a
+temp directory rather than reusing a working checkout, and a bundle built
+locally is not guaranteed to match one built by CI. Only CI's output is
+published.
 
 Verified: `go run github.com/zsrv/goscape/cmd/goscape-cli` resolves from this
 module, because `goscape` is already a dependency and `cmd/goscape-cli` is a
@@ -277,14 +333,37 @@ One structural difference from the client's workflow — a `pack` job upstream o
 the matrix:
 
 ```
-gate ──> pack (ubuntu, CGO off) ──> build matrix (5 native runners) ──> release
-              └── uploads pack/ ────┘ downloads it, builds -tags embedcache
+gate ──> pack (ubuntu) ──────────────> build matrix (5 native runners) ──> release
+           1. checkout Content @ pin        └── downloads bundle,
+           2. checkout Engine-TS @ pin          builds -tags embedcache
+           3. bun install + Build.ts
+              (generates pack/*.pack)
+           4. goscape-cli pack
+           5. uploads bundle/ ───────────┘
 ```
+
+The pack job has five steps rather than one, because the goscape packer cannot
+run against a bare Content clone (see *The generated pack indexes*). Steps 2-3
+are a Bun toolchain and an Engine-TS checkout pinned by `content.lock`'s
+`engine_*` fields; they exist solely to write the server-only `pack/*.pack`
+indexes into the Content clone. Only step 4's output is uploaded — Engine-TS's
+own cache output is discarded.
+
+Bun is required rather than Node because Engine-TS ships only `bun.lock`; a
+Node path would resolve its dependencies unpinned on every run, which a
+release pipeline cannot accept. It is installed from npm through the
+first-party `actions/setup-node`, **not** a third-party `setup-bun` action —
+this workflow deliberately carries no third-party actions, for the same reason
+the release step uses the preinstalled `gh` CLI instead of
+`softprops/action-gh-release`.
 
 Packing runs the RuneScript compiler; inside the matrix it would run five
 times. Packing once also guarantees all five platforms embed a byte-identical
 cache, so `PackDigest` is identical across targets — which matters, because
-that digest is what `-version` invites users to compare.
+that digest is what `-version` invites users to compare. The index generation
+must likewise happen exactly once, upstream of the matrix: run per-target it
+could assign different IDs on different runners and silently produce five
+divergent caches.
 
 Link-time values follow the client's approach, including its security posture:
 untrusted input reaches `run:` steps through env, never string interpolation.
@@ -305,6 +384,12 @@ FS, so no large fixture is needed:
 | foreign `content.tmp-*` with a recent mtime | left alone — it may be a live peer |
 | precedence | table test over explicit/default `--cache-dir` × embedded/not |
 | provenance rendering | embedded and non-embedded forms |
+
+A pack-pipeline check belongs here too, and did not exist before: after the
+index-generation step, assert that `pack/param.pack` in the clone contains a
+name that only the pinned content revision introduces. Without it, a silently
+skipped Engine-TS build degrades into the same opaque `invalid property value`
+failure this design exists to avoid.
 
 Build coverage needs deliberate care: without it, the `embedcache` path would
 only ever compile during a release. CI gains a second build job running

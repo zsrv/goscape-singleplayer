@@ -982,12 +982,20 @@ change to the derivation logic.
 - [ ] **Step 1: Write content.lock**
 
 ```
-# Pinned LostCityRS/Content revision for this branch. Bump with a commit that
-# says what changed upstream; `make embed-pack` reads this file, and the
-# release workflow stamps the commit into the binary.
-repo   = LostCityRS/Content
-branch = 274
-commit = 2b62ae68dfed02b441bae47987a01d6bcbaeb358
+# Pinned upstream revisions for this branch. Bump with a commit that says what
+# changed upstream; `make embed-pack` reads this file, and the release workflow
+# stamps the content commit into the binary.
+#
+# The engine_* pin is not optional. Content gitignores fourteen pack/*.pack ID
+# indexes ("generated for the server only"), goscape reads them but never
+# writes them, and Engine-TS's tools/pack/PackFile.ts is what auto-assigns and
+# saves them. A bare Content clone cannot be packed without this step.
+repo          = LostCityRS/Content
+branch        = 274
+commit        = 2b62ae68dfed02b441bae47987a01d6bcbaeb358
+engine_repo   = LostCityRS/Engine-TS
+engine_branch = 274
+engine_commit = 1d25566cb53e7af1b1cb18ade8af996316c19614
 ```
 
 - [ ] **Step 2: Write the Makefile**
@@ -1010,6 +1018,8 @@ MARKER     := internal/content/embedded/.bundle-complete
 CONTENT_REPO   := $(shell sed -n 's/^repo[[:space:]]*=[[:space:]]*//p' content.lock)
 CONTENT_BRANCH := $(shell sed -n 's/^branch[[:space:]]*=[[:space:]]*//p' content.lock)
 CONTENT_COMMIT := $(shell sed -n 's/^commit[[:space:]]*=[[:space:]]*//p' content.lock)
+ENGINE_REPO    := $(shell sed -n 's/^engine_repo[[:space:]]*=[[:space:]]*//p' content.lock)
+ENGINE_COMMIT  := $(shell sed -n 's/^engine_commit[[:space:]]*=[[:space:]]*//p' content.lock)
 
 GIT_REVISION := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 GIT_BRANCH   := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
@@ -1050,21 +1060,33 @@ build-embedded: ## build with the bundle in $(BUNDLE_DIR) embedded
 
 embed-pack: ## pack the pinned Content revision into $(BUNDLE_DIR)
 	@test -n "$(CONTENT_COMMIT)" || { echo "content.lock: no commit pinned" >&2; exit 1; }
+	@test -n "$(ENGINE_COMMIT)" || { echo "content.lock: no engine commit pinned" >&2; exit 1; }
+	@command -v bun >/dev/null || { echo "bun is required: Engine-TS generates the pack/*.pack ID indexes that Content gitignores and the goscape packer only reads. See https://bun.sh" >&2; exit 1; }
 	rm -f $(MARKER)
 	rm -rf $(BUNDLE_DIR)
 	mkdir -p $(PACK_DIR) $(RAW_DIR)
-# One shell, so the trap can remove the clone on EVERY exit path. Make runs
+# One shell, so the trap can remove BOTH clones on EVERY exit path. Make runs
 # each recipe line in its own shell and aborts at the first failure, so a
-# trailing `rm -rf` is only reached when nothing went wrong.
+# trailing `rm -rf` is only reached when nothing went wrong. Content and
+# Engine-TS are cloned as siblings under one temp root, so a single trap
+# covers them and neither can be mistaken for content by the engine's crawl.
 	set -euo pipefail; \
-	WORK=$$(mktemp -d); \
-	trap 'rm -rf "$$WORK"' EXIT; \
+	ROOT=$$(mktemp -d); \
+	trap 'rm -rf "$$ROOT"' EXIT; \
+	SRC="$$ROOT/content"; ENGINE="$$ROOT/engine"; \
 	git clone --filter=blob:none --no-checkout \
-	    https://github.com/$(CONTENT_REPO).git "$$WORK"; \
-	git -C "$$WORK" checkout --detach $(CONTENT_COMMIT); \
+	    https://github.com/$(CONTENT_REPO).git "$$SRC"; \
+	git -C "$$SRC" checkout --detach $(CONTENT_COMMIT); \
+	git clone --filter=blob:none --no-checkout \
+	    https://github.com/$(ENGINE_REPO).git "$$ENGINE"; \
+	git -C "$$ENGINE" checkout --detach $(ENGINE_COMMIT); \
+	( cd "$$ENGINE" && bun install --frozen-lockfile && \
+	  BUILD_SRC_DIR="$$SRC" bun run tools/pack/Build.ts ); \
+	test -s "$$SRC/pack/param.pack" || \
+	  { echo "engine build wrote no pack/param.pack — the goscape packer cannot resolve struct params without it" >&2; exit 1; }; \
 	GOSCAPE_RAW=$$(go list -m -f '{{.Dir}}' github.com/zsrv/goscape)/data/raw; \
 	CGO_ENABLED=0 go run github.com/zsrv/goscape/cmd/goscape-cli pack \
-	    --src-dir "$$WORK" --out-dir $(PACK_DIR) --raw-dir "$$GOSCAPE_RAW"; \
+	    --src-dir "$$SRC" --out-dir $(PACK_DIR) --raw-dir "$$GOSCAPE_RAW"; \
 	install -m 0644 "$$GOSCAPE_RAW"/wordenc $(RAW_DIR)/wordenc
 	touch $(MARKER)
 	@echo "bundle ready: $$(du -sh $(BUNDLE_DIR) | cut -f1), digest $(PACK_DIGEST)"
@@ -1525,8 +1547,39 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # `make embed-pack` runs Engine-TS's tools/pack/Build.ts to generate the
+      # server-only pack/*.pack ID indexes, which Content gitignores and the
+      # goscape packer only ever reads. Without Bun that step cannot run, and
+      # the pack fails with an opaque "invalid property value" on the first
+      # struct param it cannot resolve.
+      #
+      # Bun is installed from npm via the first-party setup-node action rather
+      # than a third-party setup-bun action: this workflow deliberately carries
+      # no third-party actions, and a mutable action tag in a release pipeline
+      # is exactly the supply-chain exposure that posture exists to avoid.
+      # Engine-TS ships only bun.lock, so Bun is also the only runtime that can
+      # install its dependencies from a frozen lockfile.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Bun
+        run: npm install -g bun@1.2.20
+
       - name: Pack the pinned Content revision
         run: make embed-pack
+
+      # Cheap guard against a silently skipped index-generation step: assert a
+      # param that only the pinned content revision introduces made it into the
+      # packed output. A missing index degrades into a confusing packer error
+      # rather than an obvious one, so fail here with a clear message instead.
+      - name: Verify the pack is complete
+        run: |
+          set -euo pipefail
+          if [ ! -s internal/content/embedded/bundle/pack/server/param.dat ]; then
+            echo "packed param.dat missing or empty — index generation likely did not run" >&2
+            exit 1
+          fi
 
       - id: digest
         name: Record the bundle digest
@@ -1740,5 +1793,19 @@ interpolation, matching goscape-client's release workflow."
 **Type consistency.** `Bundle() (fs.FS, bool)` is defined in Task 2 and consumed unchanged in Tasks 4 and 5. `EnsureExtracted(src fs.FS, dir, digest string) error` and `StampName` are defined in Task 3 and consumed in Task 4's `ResolveCacheDir` and its tests. `build.Info()` (Task 1) and `content.Info()` (Task 4) are both consumed by main's `-version` handler. The ldflags paths in Task 5's Makefile and Task 8's workflow both target `internal/build` and `internal/content` package variables that Tasks 1 and 4 actually declare: `Version`, `Revision`, `Branch`, `BuildUser`, `BuildDate`, `Repo`, `Branch`, `Commit`, `PackDigest`.
 
 **Known ordering hazard.** Task 6 Step 2 discovers that `TestBundleAbsentWithoutBuildTag` (Task 2) fails under `-tags embedcache`; Step 3 fixes it with a `//go:build !embedcache` guard. This is deliberate — the failure is worth seeing rather than pre-empting, because it demonstrates that the tagged and untagged builds really are different programs.
+
+**Backport note — engine pins.** Every branch needs its own `engine_*` pin in
+`content.lock`, matching Engine-TS's per-revision branches. These are the tips
+as of 2026-08-31, and goscape's own source comments cite several of them as its
+port targets (`PackFile.ts @ 2e3bcf43` for rev-254, `@ 9aadcec4` for rev-244),
+which is good evidence the pairing is right:
+
+| Branch | Engine-TS branch | Commit |
+|---|---|---|
+| rev-274 | `274` | `1d25566cb53e7af1b1cb18ade8af996316c19614` |
+| rev-254 | `254` | `2e3bcf4392200e84dd15ce67008c5d41fa4537aa` |
+| rev-245.2 | `245.2` | `3c16994ca4ba51b4e04f88316c1f7395b0c4bb8a` |
+| rev-244 | `244` | `9aadcec4e9560b810b5e5eee31aadc67f3b206cd` |
+| rev-225 | `225` | `e1dea19f256c7ff1a89d47024c811c755ad2184d` |
 
 **Backport note.** Only `Makefile` (the `--raw-dir` argument and the `install` of wordenc) and `internal/content/testdata/fixturebundle/` differ on rev-225, whose packer compiles wordenc from Content's own sources into `pack/client/wordenc`. Everything else backports unchanged.
