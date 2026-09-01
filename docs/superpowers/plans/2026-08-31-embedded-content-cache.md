@@ -1764,17 +1764,17 @@ interpolation, matching goscape-client's release workflow."
 **Backport note — goscape pin.** No engine pin is needed: goscape generates
 Content's gitignored ID indexes itself. Each branch must pin a goscape at or
 after its *Pack ID index generation* commit, though — an older pin fails with
-the opaque `invalid property value` this design exists to avoid. Those commits,
-as they stand locally before the publish-time timestamp rewrite (which changes
-every SHA — match by subject, not by hash, once published):
+the opaque `invalid property value` this design exists to avoid. These SHAs are
+post-timestamp-sanitization and stable unless goscape's history is rewritten
+again; if it is, match by commit subject rather than by hash:
 
 | Branch | goscape commit | Verified against Content |
 |---|---|---|
-| rev-274 | `47eb0ed7` | `2b62ae68` — 19 → 30 indexes, 39 MB |
-| rev-254 | `7f79cb6c` | `caee3f2e` — 19 → 30 indexes, 41 MB |
-| rev-245.2 | `f7efb7ac` | `cbcfe670` — 18 → 29 indexes, 38 MB |
-| rev-244 | `d0a19db9` | `e5d0282e` — 18 → 29 indexes, 37 MB |
-| rev-225 | `2e7716ff` | `9901aa27` — 15 → 26 indexes, 27 MB |
+| rev-274 | `9942c675` | `2b62ae68` — 19 → 30 indexes, 39 MB |
+| rev-254 | `44ace795` | `caee3f2e` — 19 → 30 indexes, 41 MB |
+| rev-245.2 | `7030681e` | `cbcfe670` — 18 → 29 indexes, 38 MB |
+| rev-244 | `c4773bcb` | `e5d0282e` — 18 → 29 indexes, 37 MB |
+| rev-225 | `07a69c84` | `9901aa27` — 15 → 26 indexes, 27 MB |
 
 rev-225 and rev-244/245.2 carry deviation `PIG-D3`: those pins predate the
 transmitted/non-transmitted split in goscape's `readAndValidate`, so index
