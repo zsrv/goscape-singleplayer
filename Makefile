@@ -37,8 +37,12 @@ CPREFIX := github.com/zsrv/goscape-singleplayer/internal/content
 # whatever bundle existed BEFORE the rm -rf, reporting an empty digest on a
 # first run and the previous run's digest on every one after. Recipes must
 # substitute this at run time with $$(...).
+# -b matches what the release workflow does: it pins the '*' binary flag in
+# the listing lines, which GNU sha256sum emits by default on Windows and
+# shasum does not on Linux/macOS. Without it the same bundle gets one digest
+# here and a different one in the Windows build job.
 PACK_DIGEST_CMD = cd $(BUNDLE_DIR) && find . -type f -print0 \
-    | LC_ALL=C sort -z | xargs -0 shasum -a 256 | shasum -a 256 \
+    | LC_ALL=C sort -z | xargs -0 shasum -a 256 -b | shasum -a 256 -b \
     | cut -d' ' -f1 | sed 's/^/sha256:/'
 
 LDFLAGS = -s -w \
