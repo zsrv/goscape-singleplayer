@@ -3,7 +3,7 @@ module github.com/zsrv/goscape-singleplayer
 go 1.27
 
 require (
-	github.com/zsrv/goscape v0.0.0-20260906000000-3230a728c3f2
+	github.com/zsrv/goscape v0.0.0-20260906000000-4589b6439580
 	github.com/zsrv/goscape-client v0.0.0-20260901000000-d0a366bedc72
 )
 
