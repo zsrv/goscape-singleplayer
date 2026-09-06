@@ -4,9 +4,16 @@ SHELL := /bin/bash
 BIN   := goscape-singleplayer
 CMD   := ./cmd/goscape-singleplayer
 
+# Must match content.SoundFontName: the client fetches this exact name from
+# the ondemand static root.
+SOUNDFONT  := SCC1_Florestan.sf2
 BUNDLE_DIR := internal/content/embedded/bundle
 PACK_DIR   := $(BUNDLE_DIR)/pack
 RAW_DIR    := $(BUNDLE_DIR)/raw
+# The SoundFont gets its own bundle member rather than sharing raw/: raw/ is
+# engine-owned raw jagfiles, and rev-225 has no raw/ at all. Must match
+# content.soundFontBundlePath.
+PUBLIC_DIR := $(BUNDLE_DIR)/public
 # Sibling of $(BUNDLE_DIR), not inside it: the embed directive is
 # //go:embed all:bundle, and the all: prefix would sweep a marker placed
 # inside bundle/ into the embedded tree and into PACK_DIGEST. Written only
@@ -75,20 +82,30 @@ embed-pack: ## pack the pinned Content revision into $(BUNDLE_DIR)
 	@test -n "$(CONTENT_COMMIT)" || { echo "content.lock: no commit pinned" >&2; exit 1; }
 	rm -f $(MARKER)
 	rm -rf $(BUNDLE_DIR)
-	mkdir -p $(PACK_DIR) $(RAW_DIR)
+	mkdir -p $(PACK_DIR) $(RAW_DIR) $(PUBLIC_DIR)
 # One shell, so the trap can remove the clone on EVERY exit path. Make runs
 # each recipe line in its own shell and aborts at the first failure, so a
-# trailing `rm -rf` is only reached when nothing went wrong.
+# trailing `rm -rf` is only reached when nothing went wrong. Keep it one
+# unbroken command: make joins the \-continued lines before handing them to
+# the shell, so a # comment anywhere inside would swallow everything after it.
+#
+# Two engine-owned blobs are copied out of the goscape module alongside the
+# packed Content: wordenc from data/raw into raw/, and the SoundFont from the
+# module root's public/ into the bundle's own public/ member. Embedding the SoundFont is what lets a release binary put it
+# where the ondemand static root can serve it, instead of every user sourcing
+# a 3 MB file by hand to get music.
 	set -euo pipefail; \
 	WORK=$$(mktemp -d); \
 	trap 'rm -rf "$$WORK"' EXIT; \
 	git clone --filter=blob:none --no-checkout \
 	    https://github.com/$(CONTENT_REPO).git "$$WORK"; \
 	git -C "$$WORK" checkout --detach $(CONTENT_COMMIT); \
-	GOSCAPE_RAW=$$(go list -m -f '{{.Dir}}' github.com/zsrv/goscape)/data/raw; \
+	GOSCAPE_DIR=$$(go list -m -f '{{.Dir}}' github.com/zsrv/goscape); \
+	GOSCAPE_RAW=$$GOSCAPE_DIR/data/raw; \
 	CGO_ENABLED=0 go run github.com/zsrv/goscape/cmd/goscape-cli pack \
 	    --src-dir "$$WORK" --out-dir $(PACK_DIR) --raw-dir "$$GOSCAPE_RAW"; \
-	install -m 0644 "$$GOSCAPE_RAW"/wordenc $(RAW_DIR)/wordenc
+	install -m 0644 "$$GOSCAPE_RAW"/wordenc $(RAW_DIR)/wordenc; \
+	install -m 0644 "$$GOSCAPE_DIR"/public/$(SOUNDFONT) $(PUBLIC_DIR)/$(SOUNDFONT)
 	touch $(MARKER)
 	@echo "bundle ready: $$(du -sh $(BUNDLE_DIR) | cut -f1), digest $$($(PACK_DIGEST_CMD))"
 
