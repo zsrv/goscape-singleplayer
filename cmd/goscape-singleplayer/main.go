@@ -96,6 +96,13 @@ func main() {
 		fatalf("server config: %v", err)
 	}
 
+	// Music is optional: the client logs one line and plays silence when the
+	// SoundFont is missing, so a failure to place it must not stop a server
+	// that is otherwise fine. Warn and carry on.
+	if err := content.EnsureSoundFont(bundle, haveBundle, cfg.OnDemand.PublicDir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v (music will be silent)\n", err)
+	}
+
 	logger, err := server.NewLogger()
 	if err != nil {
 		fatalf("logger: %v", err)

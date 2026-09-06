@@ -63,6 +63,19 @@ the cache root — and the chat word filter (wordenc) is baked into the cache
 itself at `client/wordenc`, so there is no separate raw wordenc file to wire up
 and no `--wordenc-path` flag on this branch.
 
+## Music
+
+The client fetches its SoundFont, `SCC1_Florestan.sf2`, over HTTP from the
+server this binary also runs, and plays silence if it 404s — logging a single
+`soundfont unavailable` line rather than failing. A release binary carries the
+SoundFont and writes it into `<data-dir>/public` on startup, so music works
+with no setup. Building from source, `make embed-pack` copies it out of the
+pinned goscape module.
+
+Without an embedded bundle, put a copy in `<data-dir>/public` yourself —
+goscape's checkout has one at `public/SCC1_Florestan.sf2`. A file already
+there is never overwritten, so your own SoundFont survives upgrades.
+
 ## Run
 
 ```bash
