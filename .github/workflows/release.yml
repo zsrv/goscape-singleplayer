@@ -51,15 +51,27 @@ jobs:
         name: Record the bundle digest
         run: |
           cd internal/content/embedded/bundle
+          # Git for Windows' bash ships coreutils but not the perl shasum;
+          # macOS ships shasum but no sha256sum. Both print "<hash>  <name>",
+          # so the two agree byte for byte. Unquoted on purpose — the shasum
+          # branch has to split into two words.
+          if command -v shasum >/dev/null 2>&1; then h="shasum -a 256"; else h=sha256sum; fi
           d=$(find . -type f -print0 | LC_ALL=C sort -z \
-              | xargs -0 shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+              | xargs -0 $h | $h | cut -d' ' -f1)
           echo "digest=sha256:$d" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bundle
           path: internal/content/embedded/bundle
           retention-days: 1
+          # The bundle is embedded with `//go:embed all:bundle`, so dotfiles —
+          # the packer's pack/.stamps/ format stamp — end up inside the binary
+          # and inside the digest. Every major since v4 excludes hidden files
+          # unless asked, and reports the exclusion only at debug level, so the
+          # downloaded tree silently came up one file short and failed every
+          # matrix job on the digest check below.
+          include-hidden-files: true
 
   build:
     needs: pack
@@ -93,7 +105,7 @@ jobs:
             libxxf86vm-dev \
             libasound2-dev
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: bundle
           path: internal/content/embedded/bundle
@@ -102,6 +114,10 @@ jobs:
       # landed corrupted or partial must never be stamped with the digest the
       # pack job computed over the original. Recompute it here, over what
       # actually downloaded, and fail before it can be baked into a binary.
+      # download-artifact@v8 checks the transport itself (digest-mismatch
+      # defaults to error), but that covers the zip it fetched, not whether
+      # the extracted tree is the one the pack job hashed — which is the
+      # property PackDigest actually claims.
       - name: Verify the downloaded bundle matches its digest
         shell: bash
         env:
@@ -109,8 +125,13 @@ jobs:
         run: |
           set -euo pipefail
           cd internal/content/embedded/bundle
+          # Git for Windows' bash ships coreutils but not the perl shasum;
+          # macOS ships shasum but no sha256sum. Both print "<hash>  <name>",
+          # so the two agree byte for byte. Unquoted on purpose — the shasum
+          # branch has to split into two words.
+          if command -v shasum >/dev/null 2>&1; then h="shasum -a 256"; else h=sha256sum; fi
           d=$(find . -type f -print0 | LC_ALL=C sort -z \
-              | xargs -0 shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+              | xargs -0 $h | $h | cut -d' ' -f1)
           got="sha256:$d"
           if [ "$got" != "$DIGEST" ]; then
             echo "downloaded bundle digest mismatch: got $got, want $DIGEST" >&2
@@ -178,7 +199,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: 7z a "goscape-singleplayer-${VERSION}-${TARGET}.zip" goscape-singleplayer.exe LICENSE NOTICE README.md
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
           path: goscape-singleplayer-*.${{ matrix.ext }}
@@ -193,7 +214,7 @@ jobs:
       # name (linux-amd64, darwin-arm64, ...) contains a hyphen and "bundle"
       # does not, so an unscoped download here can't pull the packed content
       # cache in alongside the five platform archives.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: '*-*'
