@@ -52,10 +52,17 @@ jobs:
         run: |
           cd internal/content/embedded/bundle
           # Git for Windows' bash ships coreutils but not the perl shasum;
-          # macOS ships shasum but no sha256sum. Both print "<hash>  <name>",
-          # so the two agree byte for byte. Unquoted on purpose — the shasum
-          # branch has to split into two words.
-          if command -v shasum >/dev/null 2>&1; then h="shasum -a 256"; else h=sha256sum; fi
+          # macOS ships shasum but no sha256sum. Unquoted on purpose — the
+          # command has to split into words.
+          #
+          # -b is what makes the two agree. The listing line is "<hash><space>
+          # <flag><name>", where the flag is '*' for binary and ' ' for text,
+          # and the default is binary "on systems where it's significant" —
+          # i.e. Windows only. Left implicit, the same bundle hashes one way on
+          # Windows and another everywhere else, which is exactly how the
+          # Windows job failed a check the other four passed. Ask both tools
+          # for binary and the listing format stops depending on the platform.
+          if command -v shasum >/dev/null 2>&1; then h="shasum -a 256 -b"; else h="sha256sum -b"; fi
           d=$(find . -type f -print0 | LC_ALL=C sort -z \
               | xargs -0 $h | $h | cut -d' ' -f1)
           echo "digest=sha256:$d" >> "$GITHUB_OUTPUT"
@@ -126,15 +133,30 @@ jobs:
           set -euo pipefail
           cd internal/content/embedded/bundle
           # Git for Windows' bash ships coreutils but not the perl shasum;
-          # macOS ships shasum but no sha256sum. Both print "<hash>  <name>",
-          # so the two agree byte for byte. Unquoted on purpose — the shasum
-          # branch has to split into two words.
-          if command -v shasum >/dev/null 2>&1; then h="shasum -a 256"; else h=sha256sum; fi
+          # macOS ships shasum but no sha256sum. Unquoted on purpose — the
+          # command has to split into words.
+          #
+          # -b is what makes the two agree. The listing line is "<hash><space>
+          # <flag><name>", where the flag is '*' for binary and ' ' for text,
+          # and the default is binary "on systems where it's significant" —
+          # i.e. Windows only. Left implicit, the same bundle hashes one way on
+          # Windows and another everywhere else, which is exactly how the
+          # Windows job failed a check the other four passed. Ask both tools
+          # for binary and the listing format stops depending on the platform.
+          if command -v shasum >/dev/null 2>&1; then h="shasum -a 256 -b"; else h="sha256sum -b"; fi
           d=$(find . -type f -print0 | LC_ALL=C sort -z \
               | xargs -0 $h | $h | cut -d' ' -f1)
           got="sha256:$d"
           if [ "$got" != "$DIGEST" ]; then
             echo "downloaded bundle digest mismatch: got $got, want $DIGEST" >&2
+            # Say enough to tell the three ways this can diverge apart without
+            # another log round trip: a different file count (something was
+            # dropped in transit), a different flag or path shape in the
+            # listing (a platform formatting difference like the one above), or
+            # neither, which means the bytes really did change.
+            echo "hashed $(find . -type f | wc -l) files here; listing begins:" >&2
+            find . -type f -print0 | LC_ALL=C sort -z \
+                | xargs -0 $h 2>/dev/null | head -3 >&2 || true
             exit 1
           fi
 
