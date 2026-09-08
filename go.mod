@@ -5,6 +5,7 @@ go 1.27
 require (
 	github.com/zsrv/goscape v0.0.0-20260906000000-53ea8cf8aba1
 	github.com/zsrv/goscape-client v0.0.0-20260901000000-72a5a265c4de
+	google.golang.org/grpc v1.83.2
 )
 
 require (
@@ -54,10 +55,10 @@ require (
 	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260825221802-da73d73af1c5 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260825221802-da73d73af1c5 // indirect
-	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	modernc.org/libc v1.75.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 	modernc.org/sqlite v1.57.0 // indirect
 )
+
