@@ -82,8 +82,15 @@ Recorded here because they remain the right answer to adjacent problems:
 | `modules/world/login_client.go:38` | `Config.LoginServerDialer func(context.Context, string) (net.Conn, error)` → `grpc.WithContextDialer` |
 | `modules/world/friends_client.go:87` | `Config.FriendsServerDialer`, same |
 
-One validation relaxation: `world/config.go:138`'s `[1, 65535]` check is
-skipped when a listener is injected.
+Three validation relaxations — an injected listener makes the port
+meaningless, so each module's `[1, 65535]` check is skipped when one is set:
+`world/config.go:138`, `login/config.go:72` and `friends/config.go:39`.
+
+The port fields themselves stay assigned even in fabric mode. `OnDemand.Port`
+is not the HTTP port but `ondemand.node-port` — the *world* port `/rs2.cgi`
+uses to emit `portoff = node-port - 43594` — and `app/config.go:117` warns
+when it disagrees with `World.TCPListenPort`. Keeping both assigned keeps that
+check quiet and makes fabric mode purely additive.
 
 Nothing downstream of the bind site changes. `world/server.go:926` spawns
 `serveTCP()`, which reads only `s.tcpListener`; login (`login.go:82`) and
