@@ -62,10 +62,12 @@ func (s *Server) Err() error { return s.err }
 
 // WaitReady polls the ondemand /crc endpoint until it serves 200, the server
 // dies, or ctx expires. /crc is the first thing the game client fetches at
-// boot, so "crc answers" is exactly the readiness the client needs.
-func (s *Server) WaitReady(ctx context.Context, ondemandPort int) error {
-	url := fmt.Sprintf("http://127.0.0.1:%d/crc", ondemandPort)
-	httpClient := &http.Client{Timeout: 2 * time.Second}
+// boot, so "crc answers" is exactly the readiness the client needs. The
+// client and base URL come from the caller because the transport underneath
+// may be in-memory rather than TCP; in fabric mode bufconn's Dial blocks
+// until Accept, which the per-probe timeout already covers.
+func (s *Server) WaitReady(ctx context.Context, httpClient *http.Client, baseURL string) error {
+	url := baseURL + "/crc"
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	lastProbe := "no probe completed"
