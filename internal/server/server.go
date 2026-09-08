@@ -64,8 +64,12 @@ func (s *Server) Err() error { return s.err }
 // dies, or ctx expires. /crc is the first thing the game client fetches at
 // boot, so "crc answers" is exactly the readiness the client needs. The
 // client and base URL come from the caller because the transport underneath
-// may be in-memory rather than TCP; in fabric mode bufconn's Dial blocks
-// until Accept, which the per-probe timeout already covers.
+// may be in-memory rather than TCP; each Get here runs with whatever
+// deadline is attached to it, not ctx, so the caller's httpClient must carry
+// its own per-attempt timeout (e.g. Timeout: 2 * time.Second) — otherwise, in
+// fabric mode, bufconn's DialContext blocks until Accept and a Get that never
+// returns would keep this loop from ever reaching the select on
+// ctx.Done()/s.done, making the deadline below unenforceable.
 func (s *Server) WaitReady(ctx context.Context, httpClient *http.Client, baseURL string) error {
 	url := baseURL + "/crc"
 	ticker := time.NewTicker(100 * time.Millisecond)
