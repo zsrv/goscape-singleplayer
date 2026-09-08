@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zsrv/goscape-singleplayer/internal/inproc"
 )
 
 func TestNewConfigWiresLoopbackStack(t *testing.T) {
@@ -154,5 +156,79 @@ func TestCheckCache(t *testing.T) {
 	}
 	if err := CheckCache(dir); err != nil {
 		t.Fatalf("CheckCache with dat file: %v", err)
+	}
+}
+
+func TestNewConfigWiresFabricListeners(t *testing.T) {
+	f := inproc.New()
+	t.Cleanup(func() { _ = f.Close() })
+
+	cfg, err := NewConfig(Options{
+		DataDir:      t.TempDir(),
+		CacheDir:     t.TempDir(),
+		WorldPort:    43594,
+		OndemandPort: 8080,
+		LoginPort:    2004,
+		FriendsPort:  2005,
+		Fabric:       f,
+	})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+
+	// The port fields stay assigned; the listener is what makes them moot.
+	// OnDemand.Port must still track World.TCPListenPort or app.CheckConfig
+	// warns and /rs2.cgi emits a wrong portoff.
+	if cfg.OnDemand.Port != cfg.World.TCPListenPort {
+		t.Errorf("OnDemand.Port = %d, want it to track World.TCPListenPort = %d",
+			cfg.OnDemand.Port, cfg.World.TCPListenPort)
+	}
+
+	if cfg.World.Listener == nil {
+		t.Error("World.Listener not wired")
+	}
+	if cfg.OnDemand.Server.Listener == nil {
+		t.Error("OnDemand.Server.Listener not wired")
+	}
+	if cfg.Login.Listener == nil {
+		t.Error("Login.Listener not wired")
+	}
+	if cfg.Friends.Listener == nil {
+		t.Error("Friends.Listener not wired")
+	}
+	if cfg.World.LoginServerDialer == nil {
+		t.Error("World.LoginServerDialer not wired")
+	}
+	if cfg.World.FriendsServerDialer == nil {
+		t.Error("World.FriendsServerDialer not wired")
+	}
+	if cfg.World.LoginServerAddress != "passthrough:///login" {
+		t.Errorf("LoginServerAddress = %q, want passthrough:///login", cfg.World.LoginServerAddress)
+	}
+	if cfg.World.FriendsServerAddress != "passthrough:///friends" {
+		t.Errorf("FriendsServerAddress = %q, want passthrough:///friends", cfg.World.FriendsServerAddress)
+	}
+}
+
+func TestNewConfigWithoutFabricKeepsPorts(t *testing.T) {
+	cfg, err := NewConfig(Options{
+		DataDir:      t.TempDir(),
+		CacheDir:     t.TempDir(),
+		WorldPort:    43594,
+		OndemandPort: 8080,
+		LoginPort:    2004,
+		FriendsPort:  2005,
+	})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	if cfg.World.Listener != nil {
+		t.Error("World.Listener set without a fabric")
+	}
+	if cfg.World.TCPListenPort != 43594 {
+		t.Errorf("TCPListenPort = %d, want 43594", cfg.World.TCPListenPort)
+	}
+	if cfg.World.LoginServerAddress != "127.0.0.1:2004" {
+		t.Errorf("LoginServerAddress = %q, want 127.0.0.1:2004", cfg.World.LoginServerAddress)
 	}
 }
