@@ -50,3 +50,7 @@ CLAUDE.local.md
 # === OS cruft ===
 .DS_Store
 Thumbs.db
+
+# Local cross-repo development only — never commit (see CONTRIBUTING.md).
+go.work
+go.work.sum
