@@ -12,6 +12,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"github.com/zsrv/goscape-client/pkg/jagex2/launch"
 	"github.com/zsrv/goscape-singleplayer/internal/build"
 	"github.com/zsrv/goscape-singleplayer/internal/content"
+	"github.com/zsrv/goscape-singleplayer/internal/inproc"
 	"github.com/zsrv/goscape-singleplayer/internal/server"
 )
 
@@ -36,6 +39,7 @@ func main() {
 	ondemandPort := flag.Int("ondemand-port", 8080, "loopback cache/OnDemand HTTP port")
 	loginPort := flag.Int("login-port", 2004, "loopback login gRPC port (internal)")
 	friendsPort := flag.Int("friends-port", 2005, "loopback friends gRPC port (internal)")
+	exposeTCP := flag.Bool("expose-tcp", false, "bind the loopback ports instead of running everything in-process (debugging: lets a second client, tcpdump or curl reach the server)")
 	mem := flag.String("mem", "high", "client memory mode: high|low")
 	worldType := flag.String("world-type", "members", "world type: free|members")
 	showVersion := flag.Bool("version", false, "print build and content provenance, then exit")
@@ -85,6 +89,11 @@ func main() {
 		fatalf("%v", err)
 	}
 
+	var fabric *inproc.Fabric
+	if !*exposeTCP {
+		fabric = inproc.New()
+	}
+
 	cfg, err := server.NewConfig(server.Options{
 		DataDir:      *dataDir,
 		CacheDir:     resolvedCacheDir,
@@ -93,6 +102,7 @@ func main() {
 		OndemandPort: *ondemandPort,
 		LoginPort:    *loginPort,
 		FriendsPort:  *friendsPort,
+		Fabric:       fabric,
 	})
 	if err != nil {
 		fatalf("server config: %v", err)
@@ -139,8 +149,23 @@ func main() {
 		})
 	}()
 
+	// The ondemand base URL is a real URL in both modes; in fabric mode the
+	// dialer ignores its host:port, which keeps the client's ported fetch
+	// sites unchanged.
+	ondemandBaseURL := fmt.Sprintf("http://127.0.0.1:%d", *ondemandPort)
+	httpClient := &http.Client{Timeout: 2 * time.Second}
+	transport := clientextras.TransportTCP
+	var dialInProc func(port int) (net.Conn, error)
+
+	if fabric != nil {
+		ondemandEP := fabric.Endpoint(server.EndpointOndemand, inproc.OndemandBufSize)
+		httpClient = &http.Client{Transport: &http.Transport{DialContext: ondemandEP.DialContext}}
+		transport = clientextras.TransportInProc
+		dialInProc = fabric.DialPort
+	}
+
 	readyCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	err = srv.WaitReady(readyCtx, *ondemandPort)
+	err = srv.WaitReady(readyCtx, httpClient, ondemandBaseURL)
 	cancel()
 	if err != nil {
 		fatalf("server failed to become ready: %v", err)
@@ -156,6 +181,11 @@ func main() {
 					code = 1
 				}
 			}
+			// Only after Stop returns: player saves and the sqlite flush
+			// happen during service shutdown and still need their transports.
+			if fabric != nil {
+				_ = fabric.Close()
+			}
 			os.Exit(code)
 		})
 		// Another goroutine is already driving the exit; park until it does.
@@ -168,9 +198,11 @@ func main() {
 		LowMemory:       lowMemory,
 		Members:         members,
 		Host:            "127.0.0.1",
-		Transport:       clientextras.TransportTCP,
+		Transport:       transport,
 		WorldPort:       *worldPort,
 		WSPath:          "",
-		OndemandBaseURL: fmt.Sprintf("http://127.0.0.1:%d", *ondemandPort),
+		OndemandBaseURL: ondemandBaseURL,
+		DialInProc:      dialInProc,
+		HTTPClient:      httpClient,
 	})
 }
