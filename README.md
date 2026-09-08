@@ -3,7 +3,8 @@
 A single-binary, singleplayer RuneScape: the
 [goscape](https://github.com/zsrv/goscape) server stack and the
 [goscape-client](https://github.com/zsrv/goscape-client) game client running in
-one process, talking to each other over loopback TCP.
+one process, communicating over in-memory transports (or loopback TCP with
+`--expose-tcp`).
 
 No server to deploy, no configuration file, no account to register — run the
 binary and you are at the login screen.
@@ -97,6 +98,7 @@ exits.
 | `--cache-dir` | `./data/pack` | packed game cache |
 | `--wordenc-path` | `<cache-dir>/../raw/wordenc` | raw wordenc jagfile for the chat filter |
 | `--data-dir` | `./data` | world database and player saves |
+| `--expose-tcp` | `false` | bind the loopback ports (43594 world, 8080 ondemand, 2004 login, 2005 friends) instead of running everything in-process. Off by default: the binary normally opens no sockets at all. Turn it on to attach a second client, run `tcpdump`, or `curl` the ondemand endpoints. |
 | `--world-port` | `43594` | game TCP port |
 | `--ondemand-port` | `8080` | cache/OnDemand HTTP port |
 | `--login-port` | `2004` | internal login gRPC port |
@@ -105,10 +107,11 @@ exits.
 | `--world-type` | `members` | `members` or `free` |
 | `--version` | | print build and content provenance, then exit |
 
-The port flags exist for collisions only. **Every listener binds `127.0.0.1`
-and there is no flag to change that** — see [`SECURITY.md`](SECURITY.md) for
-the trust model, including what loopback binding does not protect against on a
-shared machine.
+With `--expose-tcp`, the port flags select which loopback ports to bind.
+**Every listener binds `127.0.0.1` and there is no flag to change that** — see
+[`SECURITY.md`](SECURITY.md) for the trust model, including what loopback
+binding does not protect against on a shared machine. Without `--expose-tcp`,
+the binary opens no sockets at all.
 
 ## Tests
 
