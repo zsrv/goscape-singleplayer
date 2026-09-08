@@ -1,9 +1,12 @@
 // Command goscape-singleplayer runs a complete singleplayer game: the full
-// goscape server stack (world, login, friends, ondemand, sqlite) in-process
-// on loopback TCP, and the goscape-client game window in the same process.
+// goscape server stack (world, login, friends, ondemand, sqlite) and the
+// goscape-client game window in the same process. By default everything
+// rides in-memory transports and the process opens no sockets; --expose-tcp
+// restores the loopback ports for debugging (a second client, tcpdump, curl).
 //
 // Exit paths (all converge on exitOnce so the server stops exactly once):
-//   - window close → clientextras.ExitFunc → graceful server Stop → exit 0
+//   - window close → clientextras.ExitFunc → graceful server Stop, then the
+//     fabric closes (only after Stop returns) → exit 0
 //   - SIGINT/SIGTERM → app's signal handler stops services → Done watcher exits
 //   - server module failure → Done watcher logs and exits 1
 package main
@@ -152,20 +155,29 @@ func main() {
 	// The ondemand base URL is a real URL in both modes; in fabric mode the
 	// dialer ignores its host:port, which keeps the client's ported fetch
 	// sites unchanged.
+	//
+	// Two distinct clients, not one shared between readiness and asset
+	// fetching: the probe needs a bounded per-attempt timeout so WaitReady's
+	// deadline is actually enforceable (bufconn's DialContext blocks until
+	// Accept, and Get otherwise carries context.Background() with no
+	// deadline of its own); the asset fetcher must not cap large archive
+	// downloads with that same short timeout.
 	ondemandBaseURL := fmt.Sprintf("http://127.0.0.1:%d", *ondemandPort)
-	httpClient := &http.Client{Timeout: 2 * time.Second}
+	probeClient := &http.Client{Timeout: 2 * time.Second}
+	var assetClient *http.Client // nil keeps clientextras.HTTPClient at http.DefaultClient
 	transport := clientextras.TransportTCP
 	var dialInProc func(port int) (net.Conn, error)
 
 	if fabric != nil {
 		ondemandEP := fabric.Endpoint(server.EndpointOndemand, inproc.OndemandBufSize)
-		httpClient = &http.Client{Transport: &http.Transport{DialContext: ondemandEP.DialContext}}
+		probeClient = &http.Client{Transport: &http.Transport{DialContext: ondemandEP.DialContext}, Timeout: 2 * time.Second}
+		assetClient = &http.Client{Transport: &http.Transport{DialContext: ondemandEP.DialContext}}
 		transport = clientextras.TransportInProc
 		dialInProc = fabric.DialPort
 	}
 
 	readyCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	err = srv.WaitReady(readyCtx, httpClient, ondemandBaseURL)
+	err = srv.WaitReady(readyCtx, probeClient, ondemandBaseURL)
 	cancel()
 	if err != nil {
 		fatalf("server failed to become ready: %v", err)
@@ -203,6 +215,6 @@ func main() {
 		WSPath:          "",
 		OndemandBaseURL: ondemandBaseURL,
 		DialInProc:      dialInProc,
-		HTTPClient:      httpClient,
+		HTTPClient:      assetClient,
 	})
 }
