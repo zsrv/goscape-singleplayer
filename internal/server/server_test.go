@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"testing"
 	"time"
@@ -41,7 +42,8 @@ func TestServerBootsReadyAndStops(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if err := srv.WaitReady(ctx, 48080); err != nil {
+	httpClient := &http.Client{Timeout: 2 * time.Second}
+	if err := srv.WaitReady(ctx, httpClient, "http://127.0.0.1:48080"); err != nil {
 		t.Fatalf("WaitReady: %v", err)
 	}
 
