@@ -23,10 +23,16 @@ only.
 
 **This is a singleplayer launcher. It assumes one trusted user on one machine.**
 
-Every listener binds `127.0.0.1`, and there is no flag to change that — the
+As shipped, there are **no listeners at all**: world, login, friends and
+ondemand all talk over in-memory transports inside one process, so there is
+no socket for anything on the network — or on the same machine — to reach.
+
+`--expose-tcp` switches every module to loopback TCP instead. In that mode,
+every listener binds `127.0.0.1`, and there is no flag to change that — the
 port flags (`--world-port`, `--ondemand-port`, `--login-port`,
-`--friends-port`) move the ports, never the bind address. Nothing here is
-reachable from the network as shipped.
+`--friends-port`) move the ports, never the bind address.
+
+Under `--expose-tcp`, these are the listeners:
 
 | Listener | Default port | Purpose |
 |---|---|---|
@@ -35,16 +41,19 @@ reachable from the network as shipped.
 | login gRPC | 2004 | internal; account lookup and player saves |
 | friends gRPC | 2005 | internal; friends and private messages |
 
-What that model does **not** cover:
+What that model does **not** cover, and **only under `--expose-tcp`**:
 
 - **Other local users.** `login` and `friends` speak gRPC with no
   authentication and no transport security. On a shared or multi-user machine,
   any local account that can open a loopback socket can read and modify your
   characters, saves and friends data. `login` also registers gRPC server
-  reflection, so its schema is discoverable.
+  reflection, so its schema is discoverable. In the default configuration
+  there is no socket for another local account to reach, so this risk does
+  not apply — it exists only once `--expose-tcp` opens the loopback ports.
 - **Port forwarding.** Anything that republishes a loopback port — an SSH
   tunnel, a container port mapping, a VPN or debugging proxy — removes the only
-  control keeping those two services private.
+  control keeping those two services private. This applies only under
+  `--expose-tcp`; with no listener there is no port to republish.
 
 If you want to run goscape for more than one player, run the real server
 instead of this launcher, and read
@@ -72,9 +81,10 @@ singleplayer use:
 
 In scope: this repository's own code — the process lifecycle in
 `cmd/goscape-singleplayer`, the embedded-server wiring in `internal/server`,
-and the pins in `go.mod`. A flaw that widens the trust model above — a listener
-that ends up on a non-loopback address, a shutdown path that corrupts saves —
-is a bug here.
+and the pins in `go.mod`. A flaw that widens the trust model above — a socket
+being opened at all in the default configuration, a listener that ends up on
+a non-loopback address under `--expose-tcp`, a shutdown path that corrupts
+saves — is a bug here.
 
 Out of scope, and better reported upstream:
 
