@@ -1,5 +1,7 @@
 // Package server boots the full goscape server stack (world, login, friends,
-// ondemand, sqlite) inside the singleplayer process, on loopback listeners.
+// ondemand, sqlite) inside the singleplayer process. By default every module
+// runs on in-memory transports and opens no socket; passing --expose-tcp
+// switches it to binding loopback listeners instead.
 package server
 
 import (
@@ -20,7 +22,8 @@ const (
 	EndpointFriends  = "friends"
 )
 
-// Options configures the embedded server stack. All listeners bind 127.0.0.1.
+// Options configures the embedded server stack. By default no listener binds
+// at all; under --expose-tcp (Fabric left nil), all listeners bind 127.0.0.1.
 type Options struct {
 	DataDir      string // world database, player saves
 	CacheDir     string // packed game cache (goscape `make pack` output)
@@ -29,9 +32,13 @@ type Options struct {
 	LoginPort    int    // internal login gRPC port
 	FriendsPort  int    // internal friends gRPC port
 
-	// Fabric, when non-nil, runs every module on in-memory transports and the
-	// four port fields are ignored. Nil binds the loopback ports, which is
-	// what --expose-tcp selects.
+	// Fabric, when non-nil, runs every module on in-memory transports. The
+	// OndemandPort, LoginPort and FriendsPort fields become moot in that
+	// mode since those endpoints are only ever reached in-process; WorldPort
+	// still matters because the game client asks for its socket by port
+	// number, so it is routed to the in-process world endpoint (see
+	// BindPort below). Nil binds the loopback ports, which is what
+	// --expose-tcp selects.
 	Fabric *inproc.Fabric
 }
 
@@ -99,7 +106,7 @@ func NewConfig(opts Options) (*app.Config, error) {
 
 		// The game client asks for its socket by port, so route that port to
 		// the world endpoint. Using opts.WorldPort rather than a constant
-		// keeps --world-port harmless instead of silently ignored.
+		// keeps --world-port meaningful instead of silently ignored.
 		opts.Fabric.BindPort(cfg.World.TCPListenPort, worldEP)
 	}
 

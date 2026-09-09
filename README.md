@@ -120,7 +120,8 @@ go test ./...
 
 `cmd/goscape-singleplayer` starts the goscape server stack in-process with
 every module enabled (`world`, `login`, `friends`, `ondemand`, SQLite), waits
-for it to report ready, then opens the client window against loopback.
+for it to report ready, then opens the client window against it — over
+in-memory transports by default, or loopback with `--expose-tcp`.
 
 The interesting part is shutdown. Three paths can end the process — the window
 closing, a signal, or a server module failing — and all three converge on one
