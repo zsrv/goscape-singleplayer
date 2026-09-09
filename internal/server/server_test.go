@@ -94,7 +94,7 @@ func TestServerBootsInProcess(t *testing.T) {
 	}
 
 	ondemandEP := f.Endpoint(EndpointOndemand, inproc.OndemandBufSize)
-	httpClient := &http.Client{Transport: &http.Transport{DialContext: ondemandEP.DialContext}}
+	httpClient := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{DialContext: ondemandEP.DialContext}}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
