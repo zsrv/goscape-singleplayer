@@ -3,8 +3,9 @@
 This repository is small on purpose. It contains no game logic: it is the glue
 that starts the [goscape](https://github.com/zsrv/goscape) server stack
 in-process, waits for it to become ready, starts the
-[goscape-client](https://github.com/zsrv/goscape-client) game window against it
-over loopback, and shuts the server down cleanly when the window closes.
+[goscape-client](https://github.com/zsrv/goscape-client) game window against
+it, over in-memory transports by default (or loopback with `--expose-tcp`),
+and shuts the server down cleanly when the window closes.
 
 **Most changes people want to make here belong in one of those two
 repositories instead.** Game behaviour, protocol handling, rendering and
