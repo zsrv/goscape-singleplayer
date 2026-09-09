@@ -14,9 +14,19 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc/test/bufconn"
 )
+
+// dialPortTimeout bounds DialPort's dial the same way the TCP branch it
+// replaces does: signlink.OpenSocket applies a 10s dialTimeout "so a stuck
+// DNS or unreachable host doesn't hang the caller indefinitely". bufconn's
+// unbounded Dial (DialContext(context.Background())) has no such guard on
+// its own — between the fabric creating a listener and the server first
+// calling Accept, an unbounded caller would block with no error — so
+// DialPort applies the same bound explicitly. A var so tests can shrink it.
+var dialPortTimeout = 10 * time.Second
 
 // Buffer sizes, chosen for what each endpoint carries. A full buffer applies
 // backpressure rather than deadlocking, because both sides of every endpoint
@@ -103,7 +113,10 @@ func (f *Fabric) BindPort(port int, ep *Endpoint) {
 // error rather than fall through to another endpoint: the client asks for
 // 43595 when the user toggles JAGGRAB on, and this process serves no JAGGRAB
 // endpoint. The error makes the client fall back to HTTP exactly as a refused
-// TCP connection would.
+// TCP connection would. The dial itself is bounded by dialPortTimeout,
+// mirroring the 10s dialTimeout the TCP branch applies in
+// signlink.OpenSocket, so a server that never reaches Accept doesn't hang
+// the caller indefinitely.
 func (f *Fabric) DialPort(port int) (net.Conn, error) {
 	f.mu.Lock()
 	ep, ok := f.ports[port]
@@ -111,7 +124,9 @@ func (f *Fabric) DialPort(port int) (net.Conn, error) {
 	if !ok {
 		return nil, fmt.Errorf("inproc: no endpoint serves port %d", port)
 	}
-	return ep.Dial()
+	ctx, cancel := context.WithTimeout(context.Background(), dialPortTimeout)
+	defer cancel()
+	return ep.DialContext(ctx, "", "")
 }
 
 // Close shuts every endpoint down. Call it only after the server stack has

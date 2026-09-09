@@ -112,6 +112,38 @@ func TestDialPortReachesBoundPort(t *testing.T) {
 	}
 }
 
+// Mirrors signlink.OpenSocket's dialTimeout: if nothing ever calls Accept on
+// the endpoint (e.g. the server died during startup, or the fabric wired the
+// wrong endpoint to a port), DialPort must return an error instead of
+// blocking forever. Shrinks dialPortTimeout for the duration so the test
+// stays fast rather than waiting out the real 10s bound.
+func TestDialPortTimesOutWhenNothingAccepts(t *testing.T) {
+	orig := dialPortTimeout
+	dialPortTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { dialPortTimeout = orig })
+
+	f := New()
+	defer f.Close()
+	ep := f.Endpoint("world", RPCBufSize)
+	f.BindPort(43594, ep)
+	// Deliberately no goroutine calling ep.Listener().Accept().
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.DialPort(43594)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("DialPort = nil error, want a timeout error when nothing accepts")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("DialPort did not return within 5s; it appears to block forever when nothing accepts")
+	}
+}
+
 func TestConnHonoursDeadlines(t *testing.T) {
 	f := New()
 	defer f.Close()
