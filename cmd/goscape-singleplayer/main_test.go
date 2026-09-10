@@ -101,3 +101,51 @@ func TestParseArgsReturnsErrorForUnknownFlag(t *testing.T) {
 		t.Fatal("parseArgs accepted an unknown flag")
 	}
 }
+
+// platform.newGLFWBackend panics on glfw.Init, glfw.CreateWindow and gl.Init
+// failure — the common case on a headless or forwarded-display machine. That
+// panic unwinds through launch.Run into main, where every graceful exit lives
+// inside clientextras.ExitFunc and so never runs. Without this, the sqlite
+// handle is never closed cleanly.
+func TestRunWindowStopsServerWhenWindowPanics(t *testing.T) {
+	stopped := false
+
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("runWindow swallowed the panic; the trace must still reach the user")
+			}
+		}()
+		runWindow(
+			func() { panic("glfw init: no display") },
+			func() { stopped = true },
+		)
+	}()
+
+	if !stopped {
+		t.Error("server was not stopped after the window panicked")
+	}
+}
+
+// The panic value must survive, or the operator loses the reason the window
+// failed — which is the whole diagnostic.
+func TestRunWindowRepanicsWithTheOriginalValue(t *testing.T) {
+	var got any
+	func() {
+		defer func() { got = recover() }()
+		runWindow(func() { panic("gl init: no GLX") }, func() {})
+	}()
+	if got != "gl init: no GLX" {
+		t.Errorf("recovered %v, want the original panic value", got)
+	}
+}
+
+// On the normal path the client drives shutdown through
+// clientextras.ExitFunc. runWindow must not stop the server a second time.
+func TestRunWindowDoesNotStopServerWhenWindowReturnsNormally(t *testing.T) {
+	stopped := false
+	runWindow(func() {}, func() { stopped = true })
+	if stopped {
+		t.Error("runWindow stopped the server on a clean return; ExitFunc owns that path")
+	}
+}
