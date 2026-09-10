@@ -15,6 +15,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -34,56 +35,109 @@ func fatalf(format string, args ...any) {
 	os.Exit(1)
 }
 
-func main() {
-	dataDir := flag.String("data-dir", "./data", "directory for the world database and player saves")
-	cacheDir := flag.String("cache-dir", "./data/pack", "packed game cache directory (goscape `make pack` output)")
-	wordencPath := flag.String("wordenc-path", "", "raw wordenc jagfile for the chat word-filter (default: <cache-dir>/../raw/wordenc)")
-	worldPort := flag.Int("world-port", 43594, "loopback game (world) TCP port")
-	ondemandPort := flag.Int("ondemand-port", 8080, "loopback cache/OnDemand HTTP port")
-	loginPort := flag.Int("login-port", 2004, "loopback login gRPC port (internal)")
-	friendsPort := flag.Int("friends-port", 2005, "loopback friends gRPC port (internal)")
-	exposeTCP := flag.Bool("expose-tcp", false, "bind the loopback ports instead of running everything in-process (debugging: lets a second client, tcpdump or curl reach the server)")
-	mem := flag.String("mem", "high", "client memory mode: high|low")
-	worldType := flag.String("world-type", "members", "world type: free|members")
-	showVersion := flag.Bool("version", false, "print build and content provenance, then exit")
-	flag.Parse()
+// options is the parsed command line. Separating it from main keeps flag
+// parsing and validation reachable from a test — main itself cannot be
+// tested, because it ends in launch.Run opening a real window.
+type options struct {
+	dataDir     string
+	cacheDir    string
+	wordencPath string
+
+	worldPort    int
+	ondemandPort int
+	loginPort    int
+	friendsPort  int
+
+	exposeTCP bool
+	lowMemory bool
+	members   bool
+
+	// explicitCacheDir records whether -cache-dir was actually passed, which
+	// content.ResolveCacheDir needs to tell "user asked for this directory"
+	// apart from "nobody said, so the embedded bundle may win".
+	explicitCacheDir bool
+}
+
+// parseArgs parses and validates args. done is true when the command has
+// already finished its work and the game must not start (--version). A
+// non-nil error is a usage problem; the flag package has already reported
+// syntax errors to out by then.
+func parseArgs(args []string, out io.Writer) (opts *options, done bool, err error) {
+	fs := flag.NewFlagSet("goscape-singleplayer", flag.ContinueOnError)
+	fs.SetOutput(out)
+
+	dataDir := fs.String("data-dir", "./data", "directory for the world database and player saves")
+	cacheDir := fs.String("cache-dir", "./data/pack", "packed game cache directory (goscape `make pack` output)")
+	wordencPath := fs.String("wordenc-path", "", "raw wordenc jagfile for the chat word-filter (default: <cache-dir>/../raw/wordenc)")
+	worldPort := fs.Int("world-port", 43594, "loopback game (world) TCP port")
+	ondemandPort := fs.Int("ondemand-port", 8080, "loopback cache/OnDemand HTTP port")
+	loginPort := fs.Int("login-port", 2004, "loopback login gRPC port (internal)")
+	friendsPort := fs.Int("friends-port", 2005, "loopback friends gRPC port (internal)")
+	exposeTCP := fs.Bool("expose-tcp", false, "bind the loopback ports instead of running everything in-process (debugging: lets a second client, tcpdump or curl reach the server)")
+	mem := fs.String("mem", "high", "client memory mode: high|low")
+	worldType := fs.String("world-type", "members", "world type: free|members")
+	showVersion := fs.Bool("version", false, "print build and content provenance, then exit")
+
+	if err := fs.Parse(args); err != nil {
+		return nil, false, err
+	}
 
 	if *showVersion {
-		fmt.Println(build.Info())
-		fmt.Println(content.Info())
-		return
+		fmt.Fprintln(out, build.Info())
+		fmt.Fprintln(out, content.Info())
+		return nil, true, nil
 	}
 
-	var lowMemory bool
+	o := &options{
+		dataDir:      *dataDir,
+		cacheDir:     *cacheDir,
+		wordencPath:  *wordencPath,
+		worldPort:    *worldPort,
+		ondemandPort: *ondemandPort,
+		loginPort:    *loginPort,
+		friendsPort:  *friendsPort,
+		exposeTCP:    *exposeTCP,
+	}
+
 	switch *mem {
 	case "high":
-		lowMemory = false
+		o.lowMemory = false
 	case "low":
-		lowMemory = true
+		o.lowMemory = true
 	default:
-		fatalf("invalid -mem %q (want high|low)", *mem)
+		return nil, false, fmt.Errorf("invalid -mem %q (want high|low)", *mem)
 	}
 
-	var members bool
 	switch *worldType {
 	case "free":
-		members = false
+		o.members = false
 	case "members":
-		members = true
+		o.members = true
 	default:
-		fatalf("invalid -world-type %q (want free|members)", *worldType)
+		return nil, false, fmt.Errorf("invalid -world-type %q (want free|members)", *worldType)
 	}
 
-	explicitCacheDir := false
-	flag.Visit(func(f *flag.Flag) {
+	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "cache-dir" {
-			explicitCacheDir = true
+			o.explicitCacheDir = true
 		}
 	})
 
+	return o, false, nil
+}
+
+func main() {
+	opts, done, err := parseArgs(os.Args[1:], os.Stdout)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	if done {
+		return
+	}
+
 	bundle, haveBundle := content.Bundle()
 	resolvedCacheDir, resolveErr := content.ResolveCacheDir(
-		explicitCacheDir, *cacheDir, *dataDir, bundle, haveBundle, content.PackDigest)
+		opts.explicitCacheDir, opts.cacheDir, opts.dataDir, bundle, haveBundle, content.PackDigest)
 	if resolveErr != nil {
 		fatalf("%v", resolveErr)
 	}
@@ -93,18 +147,18 @@ func main() {
 	}
 
 	var fabric *inproc.Fabric
-	if !*exposeTCP {
+	if !opts.exposeTCP {
 		fabric = inproc.New()
 	}
 
 	cfg, err := server.NewConfig(server.Options{
-		DataDir:      *dataDir,
+		DataDir:      opts.dataDir,
 		CacheDir:     resolvedCacheDir,
-		WordEncPath:  *wordencPath,
-		WorldPort:    *worldPort,
-		OndemandPort: *ondemandPort,
-		LoginPort:    *loginPort,
-		FriendsPort:  *friendsPort,
+		WordEncPath:  opts.wordencPath,
+		WorldPort:    opts.worldPort,
+		OndemandPort: opts.ondemandPort,
+		LoginPort:    opts.loginPort,
+		FriendsPort:  opts.friendsPort,
 		Fabric:       fabric,
 	})
 	if err != nil {
@@ -162,7 +216,7 @@ func main() {
 	// Accept, and Get otherwise carries context.Background() with no
 	// deadline of its own); the asset fetcher must not cap large archive
 	// downloads with that same short timeout.
-	ondemandBaseURL := fmt.Sprintf("http://127.0.0.1:%d", *ondemandPort)
+	ondemandBaseURL := fmt.Sprintf("http://127.0.0.1:%d", opts.ondemandPort)
 	probeClient := &http.Client{Timeout: 2 * time.Second}
 	var assetClient *http.Client // nil keeps clientextras.HTTPClient at http.DefaultClient
 	transport := clientextras.TransportTCP
@@ -207,11 +261,11 @@ func main() {
 	launch.Run(launch.Options{
 		NodeID:          10, // must match the server's world.node-id / ondemand.node-id defaults (both 10)
 		StoreID:         32,
-		LowMemory:       lowMemory,
-		Members:         members,
+		LowMemory:       opts.lowMemory,
+		Members:         opts.members,
 		Host:            "127.0.0.1",
 		Transport:       transport,
-		WorldPort:       *worldPort,
+		WorldPort:       opts.worldPort,
 		WSPath:          "",
 		OndemandBaseURL: ondemandBaseURL,
 		DialInProc:      dialInProc,
