@@ -4,11 +4,16 @@
 // rides in-memory transports and the process opens no sockets; --expose-tcp
 // restores the loopback ports for debugging (a second client, tcpdump, curl).
 //
-// Exit paths (all converge on exitOnce so the server stops exactly once):
+// Exit paths. stopOnce guarantees the server stops at most once and exitOnce
+// that the process exits at most once; the two are separate because the panic
+// path needs the stop without owning the exit:
 //   - window close → clientextras.ExitFunc → graceful server Stop, then the
 //     fabric closes (only after Stop returns) → exit 0
 //   - SIGINT/SIGTERM → app's signal handler stops services → Done watcher exits
 //   - server module failure → Done watcher logs and exits 1
+//   - window creation panics (headless machine: glfw.Init, glfw.CreateWindow
+//     or gl.Init) → runWindow stops the server so sqlite closes cleanly, then
+//     lets the panic continue so the operator still sees why
 package main
 
 import (
@@ -128,6 +133,29 @@ func parseArgs(args []string, out io.Writer) (opts *options, done bool, err erro
 	return o, false, nil
 }
 
+// runWindow invokes launch, and if it panics, stops the server before letting
+// the panic continue.
+//
+// platform.newGLFWBackend panics rather than returning an error on glfw.Init,
+// glfw.CreateWindow or gl.Init failure — the usual outcome on a headless or
+// forwarded-display machine. That panic unwinds through launch.Run into main,
+// and every graceful exit path in this command lives inside
+// clientextras.ExitFunc or the Done watcher, both of which it bypasses. The
+// server would then die with the process, leaving sqlite without a clean
+// close.
+//
+// stop is not called when launch returns normally: that path belongs to
+// clientextras.ExitFunc, which the client invokes itself.
+func runWindow(launch func(), stop func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			stop()
+			panic(r)
+		}
+	}()
+	launch()
+}
+
 func main() {
 	opts, done, err := parseArgs(os.Args[1:], os.Stdout)
 	if err != nil {
@@ -234,20 +262,34 @@ func main() {
 		fatalf("server failed to become ready: %v", err)
 	}
 
-	// Window close / client shutdown: stop the server first (player saves +
-	// sqlite flush happen during service shutdown), then leave the process.
-	clientextras.ExitFunc = func(code int) {
-		exitOnce.Do(func() {
+	// Stops the server, then closes the fabric — in that order, at most once.
+	// Player saves and the sqlite flush happen during service shutdown and
+	// still need their transports, so the fabric can only close after Stop
+	// returns. Separate from exitOnce because two different callers need the
+	// stop without both owning the process exit: ExitFunc (which exits
+	// afterwards) and runWindow (which re-panics afterwards).
+	var (
+		stopOnce   sync.Once
+		stopFailed bool
+	)
+	stopServer := func() {
+		stopOnce.Do(func() {
 			if err := srv.Stop(10 * time.Second); err != nil {
 				logger.Error("server shutdown", "err", err)
-				if code == 0 {
-					code = 1
-				}
+				stopFailed = true
 			}
-			// Only after Stop returns: player saves and the sqlite flush
-			// happen during service shutdown and still need their transports.
 			if fabric != nil {
 				_ = fabric.Close()
+			}
+		})
+	}
+
+	// Window close / client shutdown: stop the server first, then leave.
+	clientextras.ExitFunc = func(code int) {
+		exitOnce.Do(func() {
+			stopServer()
+			if stopFailed && code == 0 {
+				code = 1
 			}
 			os.Exit(code)
 		})
@@ -255,16 +297,18 @@ func main() {
 		select {}
 	}
 
-	launch.Run(launch.Options{
-		NodeID:          10, // must match the server's world.node-id / ondemand.node-id defaults (both 10)
-		LowMemory:       opts.lowMemory,
-		Members:         opts.members,
-		Host:            "127.0.0.1",
-		Transport:       transport,
-		WorldPort:       opts.worldPort,
-		WSPath:          "",
-		OndemandBaseURL: ondemandBaseURL,
-		DialInProc:      dialInProc,
-		HTTPClient:      assetClient,
-	})
+	runWindow(func() {
+		launch.Run(launch.Options{
+			NodeID:          10, // must match the server's world.node-id / ondemand.node-id defaults (both 10)
+			LowMemory:       opts.lowMemory,
+			Members:         opts.members,
+			Host:            "127.0.0.1",
+			Transport:       transport,
+			WorldPort:       opts.worldPort,
+			WSPath:          "",
+			OndemandBaseURL: ondemandBaseURL,
+			DialInProc:      dialInProc,
+			HTTPClient:      assetClient,
+		})
+	}, stopServer)
 }
