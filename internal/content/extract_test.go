@@ -1,8 +1,10 @@
 package content
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -188,5 +190,38 @@ func TestEnsureExtractedIsFastOnWarmStart(t *testing.T) {
 	}
 	if !os.SameFile(before, after) {
 		t.Error("warm start replaced dir via rename; a matching stamp must return immediately with no filesystem writes")
+	}
+}
+
+// A malformed bundle must be rejected rather than silently skipped. The
+// embedded pack is built by `make embed-pack`, so a non-regular entry means
+// the build produced something unexpected and extracting a partial tree would
+// hand the server a cache with a hole in it.
+func TestWriteTreeRejectsNonRegularEntry(t *testing.T) {
+	src := fstest.MapFS{
+		"server/main_file_cache.dat": {Data: []byte("real")},
+		"server/link":                {Mode: fs.ModeSymlink, Data: []byte("elsewhere")},
+	}
+
+	err := writeTree(src, filepath.Join(t.TempDir(), "out"))
+	if err == nil {
+		t.Fatal("writeTree accepted a non-regular entry")
+	}
+	if !strings.Contains(err.Error(), "non-regular") {
+		t.Errorf("error %q does not say what was wrong", err)
+	}
+}
+
+// removeStale scans the parent directory for other processes' leftovers. On a
+// first run that parent does not exist yet, which is not an error — there is
+// simply nothing stale to sweep. Returning an error here would make every
+// cold start fail.
+func TestRemoveStaleToleratesMissingParent(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "nonexistent")
+	err := removeStale(parent, "pack",
+		filepath.Join(parent, "pack.tmp-1"),
+		filepath.Join(parent, "pack.old-1"))
+	if err != nil {
+		t.Errorf("removeStale with a missing parent returned %v, want nil", err)
 	}
 }
