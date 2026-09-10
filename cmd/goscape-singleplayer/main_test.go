@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -138,6 +139,50 @@ func TestOndemandBaseURLUsesLoopbackWhenTCPExposed(t *testing.T) {
 	got := ondemandBaseURL(false, 9090)
 	if want := "http://127.0.0.1:9090"; got != want {
 		t.Errorf("ondemandBaseURL(false, 9090) = %q, want %q", got, want)
+	}
+}
+
+// In fabric mode an injected listener overrides each module's port, and the
+// world's two bridge addresses become passthrough:/// targets — so these three
+// flags are accepted and then ignored. Saying so beats letting someone debug
+// why -login-port 3000 changed nothing. -world-port is excluded because it
+// still does two real jobs: the fabric routes the client's socket by it, and
+// cfg.OnDemand.Port derives portoff from it.
+func TestInertPortFlagsNamesTheIgnoredPortsInFabricMode(t *testing.T) {
+	opts, _, err := parseArgs([]string{
+		"-login-port", "3000", "-friends-port", "3001",
+		"-ondemand-port", "3002", "-world-port", "3003",
+	}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+
+	got := inertPortFlags(opts)
+	want := []string{"-ondemand-port", "-login-port", "-friends-port"}
+	if !slices.Equal(got, want) {
+		t.Errorf("inertPortFlags = %v, want %v", got, want)
+	}
+}
+
+// Under --expose-tcp every port is bound for real, so none is inert.
+func TestInertPortFlagsEmptyWhenTCPExposed(t *testing.T) {
+	opts, _, err := parseArgs([]string{"-expose-tcp", "-login-port", "3000"}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if got := inertPortFlags(opts); len(got) != 0 {
+		t.Errorf("inertPortFlags = %v under --expose-tcp, want none", got)
+	}
+}
+
+// A default the user never typed is not a mistake worth warning about.
+func TestInertPortFlagsSilentWhenNoPortFlagsPassed(t *testing.T) {
+	opts, _, err := parseArgs(nil, io.Discard)
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if got := inertPortFlags(opts); len(got) != 0 {
+		t.Errorf("inertPortFlags = %v with no port flags passed, want none", got)
 	}
 }
 
