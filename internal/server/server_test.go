@@ -66,7 +66,7 @@ func TestServerBootsReadyAndStops(t *testing.T) {
 func TestServerBootsInProcess(t *testing.T) {
 	cacheDir := os.Getenv("GOSCAPE_SP_TEST_CACHE")
 	if cacheDir == "" {
-		cacheDir = "../../../goscape/data/pack"
+		cacheDir = "../../../goscape-rev245.2/data/pack"
 	}
 	if err := CheckCache(cacheDir); err != nil {
 		t.Skipf("packed cache unavailable: %v", err)
