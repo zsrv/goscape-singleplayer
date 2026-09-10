@@ -24,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,6 +62,11 @@ type options struct {
 	// content.ResolveCacheDir needs to tell "user asked for this directory"
 	// apart from "nobody said, so the embedded bundle may win".
 	explicitCacheDir bool
+
+	// explicit names every flag the user actually passed, so a flag that is
+	// accepted but cannot take effect can be reported rather than ignored. A
+	// default value cannot carry this; only flag.Visit can.
+	explicit map[string]bool
 }
 
 // parseArgs parses and validates args. done is true when the command has
@@ -122,13 +128,34 @@ func parseArgs(args []string, out io.Writer) (opts *options, done bool, err erro
 		return nil, false, fmt.Errorf("invalid -world-type %q (want free|members)", *worldType)
 	}
 
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "cache-dir" {
-			o.explicitCacheDir = true
-		}
-	})
+	o.explicit = make(map[string]bool)
+	fs.Visit(func(f *flag.Flag) { o.explicit[f.Name] = true })
+	o.explicitCacheDir = o.explicit["cache-dir"]
 
 	return o, false, nil
+}
+
+// inertPortFlags names the port flags the user passed that cannot take effect
+// in the selected mode, in flag-declaration order.
+//
+// In fabric mode each module serves an injected listener instead of binding,
+// so Login.GRPCListenPort, Friends.GRPCListenPort and
+// OnDemand.Server.HTTPListenPort are all overridden, and world's two bridge
+// addresses are replaced with passthrough:/// targets. -world-port is NOT
+// inert: the fabric routes the client's socket by it (BindPort) and
+// cfg.OnDemand.Port derives portoff from it. Under --expose-tcp every port is
+// bound for real, so nothing is inert.
+func inertPortFlags(o *options) []string {
+	if o.exposeTCP {
+		return nil
+	}
+	var inert []string
+	for _, name := range []string{"ondemand-port", "login-port", "friends-port"} {
+		if o.explicit[name] {
+			inert = append(inert, "-"+name)
+		}
+	}
+	return inert
 }
 
 // ondemandBaseURL is the base URL both the readiness probe and the client's
@@ -179,6 +206,14 @@ func main() {
 	}
 	if done {
 		return
+	}
+
+	// Accepted-but-ignored flags are worth a word: without this, -login-port
+	// 3000 silently changes nothing and the next hour goes on finding out why.
+	if inert := inertPortFlags(opts); len(inert) > 0 {
+		fmt.Fprintf(os.Stderr,
+			"warning: %s ignored: those modules run in-process, so nothing binds a port (pass --expose-tcp to bind them)\n",
+			strings.Join(inert, ", "))
 	}
 
 	bundle, haveBundle := content.Bundle()
