@@ -1,8 +1,11 @@
 package content
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -125,5 +128,26 @@ func TestEnsureSoundFont_Idempotent(t *testing.T) {
 	}
 	if !first.ModTime().Equal(second.ModTime()) {
 		t.Errorf("file was rewritten: mtime %v → %v", first.ModTime(), second.ModTime())
+	}
+}
+
+// errFS yields a read error that is not fs.ErrNotExist, which is the one case
+// EnsureSoundFont must report rather than treat as "this build has no
+// SoundFont". A corrupt embedded bundle should not look like an absent one.
+type errFS struct{ err error }
+
+func (e errFS) Open(string) (fs.File, error) { return nil, e.err }
+
+func TestEnsureSoundFont_PropagatesUnreadableBundle(t *testing.T) {
+	dir := t.TempDir()
+	err := EnsureSoundFont(errFS{err: errors.New("bundle truncated")}, true, dir)
+	if err == nil {
+		t.Fatal("EnsureSoundFont ignored an unreadable bundle; a corrupt bundle must not pass for an absent one")
+	}
+	if !strings.Contains(err.Error(), "bundle truncated") {
+		t.Errorf("error %q does not wrap the underlying cause", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, SoundFontName)); statErr == nil {
+		t.Error("a SoundFont was installed despite the read failing")
 	}
 }
