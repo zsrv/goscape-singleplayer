@@ -2,8 +2,13 @@ package main
 
 import (
 	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/zsrv/goscape-singleplayer/internal/inproc"
 )
 
 // An unknown -mem value is a usage error, not a silent fallback to one of the
@@ -99,6 +104,73 @@ func TestParseArgsDistinguishesExplicitCacheDir(t *testing.T) {
 func TestParseArgsReturnsErrorForUnknownFlag(t *testing.T) {
 	if _, _, err := parseArgs([]string{"-nonsuch"}, io.Discard); err == nil {
 		t.Fatal("parseArgs accepted an unknown flag")
+	}
+}
+
+// In fabric mode nothing is listening on a port, and the injected dialer
+// ignores the address entirely — so the host must be one that cannot resolve.
+// With a loopback host, a dialer that failed to be wired up would instead
+// reach whatever really owns that port (a stray instance, an unrelated dev
+// server on 8080) and the readiness probe would report success against a
+// stranger. TestServerBootsInProcess already relies on a non-resolving host
+// for exactly this reason; production must not be weaker than its own test.
+func TestOndemandBaseURLCannotResolveInFabricMode(t *testing.T) {
+	got := ondemandBaseURL(true, 8080)
+
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("ondemandBaseURL returned an unparseable URL %q: %v", got, err)
+	}
+	// RFC 2606 reserves .invalid as guaranteed never to resolve.
+	if !strings.HasSuffix(u.Hostname(), ".invalid") {
+		t.Errorf("fabric-mode host %q is not in the reserved .invalid TLD", u.Hostname())
+	}
+	for _, reachable := range []string{"127.0.0.1", "localhost", "::1", "0.0.0.0"} {
+		if strings.Contains(got, reachable) {
+			t.Errorf("fabric-mode URL %q names reachable host %q", got, reachable)
+		}
+	}
+}
+
+// Under --expose-tcp the port is real and the client dials it for real, so the
+// URL has to be the loopback address it actually binds.
+func TestOndemandBaseURLUsesLoopbackWhenTCPExposed(t *testing.T) {
+	got := ondemandBaseURL(false, 9090)
+	if want := "http://127.0.0.1:9090"; got != want {
+		t.Errorf("ondemandBaseURL(false, 9090) = %q, want %q", got, want)
+	}
+}
+
+// Pins the assumption the .invalid host rests on: an http.Transport with a
+// DialContext of our own never resolves the URL's host, so an unresolvable
+// host is harmless on the real fetch path — not just on WaitReady's probe,
+// which is all TestServerBootsInProcess covers. If net/http ever resolved
+// first, the client's archive and SoundFont fetches would break and only a
+// play test would notice.
+func TestInjectedDialerNeverResolvesTheHost(t *testing.T) {
+	fabric := inproc.New()
+	defer func() { _ = fabric.Close() }()
+	ep := fabric.Endpoint("ondemand", inproc.OndemandBufSize)
+
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	})}
+	go func() { _ = srv.Serve(ep.Listener()) }()
+	defer func() { _ = srv.Close() }()
+
+	c := &http.Client{Transport: &http.Transport{DialContext: ep.DialContext}, Timeout: 5 * time.Second}
+	resp, err := c.Get(ondemandBaseURL(true, 8080) + "/crc")
+	if err != nil {
+		t.Fatalf("GET through the injected dialer failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status %d, want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || string(body) != "ok" {
+		t.Errorf("body %q err %v, want \"ok\"", body, err)
 	}
 }
 
