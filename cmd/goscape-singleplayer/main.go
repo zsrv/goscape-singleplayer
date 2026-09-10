@@ -133,6 +133,24 @@ func parseArgs(args []string, out io.Writer) (opts *options, done bool, err erro
 	return o, false, nil
 }
 
+// ondemandBaseURL is the base URL both the readiness probe and the client's
+// ported fetch sites use for the ondemand HTTP service.
+//
+// Under --expose-tcp the port is real, so this is the loopback address the
+// module actually binds. In fabric mode nothing binds at all and the injected
+// dialer ignores the address, which makes the host arbitrary — so it is
+// deliberately one that cannot resolve. A loopback host would mean that a
+// dialer which somehow failed to be wired up would reach whatever really owns
+// that port instead, and the readiness probe would report success against a
+// stranger. RFC 2606 reserves .invalid as guaranteed never to resolve, so a
+// mis-wiring fails loudly.
+func ondemandBaseURL(inProcess bool, port int) string {
+	if inProcess {
+		return "http://ondemand.invalid"
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
+}
+
 // runWindow invokes launch, and if it panics, stops the server before letting
 // the panic continue.
 //
@@ -231,17 +249,13 @@ func main() {
 		})
 	}()
 
-	// The ondemand base URL is a real URL in both modes; in fabric mode the
-	// dialer ignores its host:port, which keeps the client's ported fetch
-	// sites unchanged.
-	//
 	// Two distinct clients, not one shared between readiness and asset
 	// fetching: the probe needs a bounded per-attempt timeout so WaitReady's
 	// deadline is actually enforceable (bufconn's DialContext blocks until
 	// Accept, and Get otherwise carries context.Background() with no
 	// deadline of its own); the asset fetcher must not cap large archive
 	// downloads with that same short timeout.
-	ondemandBaseURL := fmt.Sprintf("http://127.0.0.1:%d", opts.ondemandPort)
+	baseURL := ondemandBaseURL(fabric != nil, opts.ondemandPort)
 	probeClient := &http.Client{Timeout: 2 * time.Second}
 	var assetClient *http.Client // nil keeps clientextras.HTTPClient at http.DefaultClient
 	transport := clientextras.TransportTCP
@@ -256,7 +270,7 @@ func main() {
 	}
 
 	readyCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	err = srv.WaitReady(readyCtx, probeClient, ondemandBaseURL)
+	err = srv.WaitReady(readyCtx, probeClient, baseURL)
 	cancel()
 	if err != nil {
 		fatalf("server failed to become ready: %v", err)
@@ -306,7 +320,7 @@ func main() {
 			Transport:       transport,
 			WorldPort:       opts.worldPort,
 			WSPath:          "",
-			OndemandBaseURL: ondemandBaseURL,
+			OndemandBaseURL: baseURL,
 			DialInProc:      dialInProc,
 			HTTPClient:      assetClient,
 		})
