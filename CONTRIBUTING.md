@@ -91,7 +91,7 @@ in the same commit.
 
 ## Development
 
-Requirements: Go 1.26 or newer, and **CGO** — the client links GLFW, OpenGL and
+Requirements: Go 1.27 or newer, and **CGO** — the client links GLFW, OpenGL and
 ALSA. On Debian or Ubuntu the system packages are the ones listed in
 [goscape-client's `.devcontainer/apt-packages.txt`](https://github.com/zsrv/goscape-client/blob/main/.devcontainer/apt-packages.txt).
 
