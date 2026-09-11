@@ -4,6 +4,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -264,5 +266,152 @@ func TestRunWindowDoesNotStopServerWhenWindowReturnsNormally(t *testing.T) {
 	runWindow(func() {}, func() { stopped = true })
 	if stopped {
 		t.Error("runWindow stopped the server on a clean return; ExitFunc owns that path")
+	}
+}
+
+// The console has to exist before anything writes to it, which means before
+// parseArgs can report a usage error — so -console is read by a throwaway
+// parse ahead of the real one. That pre-pass must agree with the real parse
+// about what the command line says, which is why it reuses parseArgs rather
+// than scanning os.Args by hand.
+func TestWantsConsoleRecognisesTheFlag(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{nil, false},
+		{[]string{"-console"}, true},
+		{[]string{"--console"}, true},
+		{[]string{"-console=true"}, true},
+		// An explicit false is how the flag package spells "off" for a
+		// boolean, and it must not be read as "the token is present".
+		{[]string{"-console=false"}, false},
+		// The case a hand-rolled scanner gets wrong: a preceding flag
+		// consumes the next argument as its value, so position-based scanning
+		// that stops at the first non-flag argument never reaches -console.
+		{[]string{"-cache-dir", "./data/pack", "-console"}, true},
+		{[]string{"-mem", "low", "-expose-tcp", "-console"}, true},
+	} {
+		if got := wantsConsole(tc.args); got != tc.want {
+			t.Errorf("wantsConsole(%q) = %v, want %v", tc.args, got, tc.want)
+		}
+	}
+}
+
+// The other half of sharing parseArgs: when -console appears where the flag
+// package would read it as another flag's value, it is not the flag. A
+// substring search over os.Args would allocate a console window here.
+func TestWantsConsoleIgnoresTheTokenWhenItIsAnotherFlagsValue(t *testing.T) {
+	if wantsConsole([]string{"-cache-dir", "-console"}) {
+		t.Error("wantsConsole treated -console as set when it was -cache-dir's value")
+	}
+}
+
+// -console is declared on every platform so scripts, shortcuts and docs stay
+// portable, but only the Windows build links as a GUI app and so only it has
+// a console to show. Saying so beats silently doing nothing, which is the
+// same call inertPortFlags makes for the port flags.
+func TestConsoleFlagIsInertOnlyOffWindows(t *testing.T) {
+	passed, _, err := parseArgs([]string{"-console"}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if !passed.console {
+		t.Fatal("parseArgs did not record -console")
+	}
+	for _, goos := range []string{"linux", "darwin", "freebsd"} {
+		if !consoleFlagInert(passed, goos) {
+			t.Errorf("-console reported as effective on %s", goos)
+		}
+	}
+	if consoleFlagInert(passed, "windows") {
+		t.Error("-console reported as inert on windows, where it is the whole point")
+	}
+
+	absent, _, err := parseArgs(nil, io.Discard)
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if consoleFlagInert(absent, "linux") {
+		t.Error("a flag the user never passed was reported as inert")
+	}
+}
+
+// The fallback log lives under -data-dir, not next to the executable: on
+// Windows the binary is often unpacked somewhere read-only or in Program
+// Files, while -data-dir is already the one directory this command requires
+// to be writable (the sqlite database and player saves are there).
+func TestLogFilePathIsUnderTheDataDir(t *testing.T) {
+	got := logFilePath(filepath.Join("C:", "games", "goscape"))
+	want := filepath.Join("C:", "games", "goscape", "logs", "goscape-singleplayer.log")
+	if got != want {
+		t.Errorf("logFilePath = %q, want %q", got, want)
+	}
+}
+
+// openLogFile runs before server.Start has created any state directory, and
+// on a first launch -data-dir itself does not exist yet.
+func TestOpenLogFileCreatesItsDirectory(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "fresh", "data")
+
+	f, err := openLogFile(dataDir)
+	if err != nil {
+		t.Fatalf("openLogFile: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if _, err := io.WriteString(f, "hello\n"); err != nil {
+		t.Fatalf("write to log: %v", err)
+	}
+	b, err := os.ReadFile(logFilePath(dataDir))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(b) != "hello\n" {
+		t.Errorf("log contains %q, want %q", b, "hello\n")
+	}
+}
+
+// One run per file. Appending would grow without bound on a machine where
+// nobody ever looks at it, and the question being asked of this file is
+// always "why did the run I just did fail", so the previous run's bytes are
+// noise at best and misleading at worst.
+func TestOpenLogFileStartsEachRunEmpty(t *testing.T) {
+	dataDir := t.TempDir()
+
+	first, err := openLogFile(dataDir)
+	if err != nil {
+		t.Fatalf("openLogFile: %v", err)
+	}
+	if _, err := io.WriteString(first, "previous run\n"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_ = first.Close()
+
+	second, err := openLogFile(dataDir)
+	if err != nil {
+		t.Fatalf("openLogFile (second run): %v", err)
+	}
+	defer func() { _ = second.Close() }()
+
+	info, err := second.Stat()
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Size() != 0 {
+		t.Errorf("log carried %d bytes over from the previous run", info.Size())
+	}
+}
+
+// setupConsole must report that stdio is usable whenever it already is, so
+// the fallback log is reserved for the one case that needs it: a windowsgui
+// binary launched from Explorer. Under `go test` the standard handles are a
+// pipe the test harness owns, which counts as usable on every platform — so
+// this holds for the Windows implementation and the no-op alike, and a
+// Windows build that answered false here would divert its log to a file in
+// every terminal session.
+func TestSetupConsoleReportsUsableStdioWhenItAlreadyHasIt(t *testing.T) {
+	if !setupConsole(false) {
+		t.Error("setupConsole reported unusable stdio while running under the test harness")
 	}
 }

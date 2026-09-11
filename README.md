@@ -52,6 +52,10 @@ CGO_ENABLED=1 go build -o goscape-singleplayer ./cmd/goscape-singleplayer
 Both upstream projects are pinned by exact version in `go.mod`, so a clone
 builds without any other checkout present.
 
+On **Windows**, prefer `make build`: it adds `-ldflags -H windowsgui`, without
+which the binary is a console app and Windows opens a console window next to
+the game window. See [Windows](#windows) below.
+
 ## The game cache
 
 Building from source, you supply your own — release binaries carry one
@@ -103,12 +107,40 @@ exits.
 | `--mem` | `high` | client memory mode: `high` or `low` |
 | `--world-type` | `members` | `members` or `free` |
 | `--version` | | print build and content provenance, then exit |
+| `--console` | `false` | Windows only: also open a console window for log output when launched from Explorer. Ignored elsewhere, and not needed when starting from a terminal — see [Windows](#windows). |
 
 With `--expose-tcp`, the port flags select which loopback ports to bind.
 **Every listener binds `127.0.0.1` and there is no flag to change that** — see
 [`SECURITY.md`](SECURITY.md) for the trust model, including what loopback
 binding does not protect against on a shared machine. Without `--expose-tcp`,
 the binary opens no sockets at all.
+
+### Windows
+
+The Windows build links as a GUI app, so double-clicking
+`goscape-singleplayer.exe` opens the game window and nothing else. Where its
+output goes depends on how it was started:
+
+| Started from | Output |
+|---|---|
+| a terminal (`cmd`, PowerShell, Git bash) | that terminal, as on any other platform |
+| a redirect or pipe (`... -version > out.txt`) | the file or pipe |
+| Explorer, a shortcut, a file association | `<data-dir>\logs\goscape-singleplayer.log` |
+| Explorer, with `--console` | a console window, as well as the game window |
+
+The log file holds what the terminal would have shown — the server log, any
+warning, and a panic trace if the window fails to open (the usual cause is a
+graphics driver or a remote session with no GL). It is truncated at every
+start, so it always describes the run you just did. `--console`'s window
+closes when the process does, so for a crash the log file is the more useful
+of the two.
+
+Linux and macOS have no console subsystem for a binary to be linked against,
+so `--console` is accepted but inert there and the binary says so when passed.
+That is not the same as saying macOS has no second window: Finder cannot launch
+a bare Unix executable without a terminal, so double-clicking the binary there
+opens Terminal.app to run it. Fixing that means shipping a `.app` bundle, which
+is a packaging change rather than a linker flag, and is not done here.
 
 ## Tests
 
