@@ -181,10 +181,21 @@ jobs:
           # An `[ ... ] && x=y` one-liner would abort the step under set -e on
           # every non-Windows runner, because the false test makes the list
           # return 1. Use an explicit if.
+          #
+          # gui is the PE subsystem flag. Without it Windows treats the binary
+          # as a console app and opens a console window next to the game
+          # window on every double-click. It stays empty elsewhere: no other
+          # platform has the notion. Unquoted inside the -ldflags string on
+          # purpose — it has to become part of that one argument, and does,
+          # because the expansion happens inside the double quotes.
           bin=goscape-singleplayer
-          if [ "$RUNNER_OS" = Windows ]; then bin=goscape-singleplayer.exe; fi
+          gui=
+          if [ "$RUNNER_OS" = Windows ]; then
+            bin=goscape-singleplayer.exe
+            gui="-H windowsgui"
+          fi
           CGO_ENABLED=1 go build -trimpath -tags embedcache \
-            -ldflags "-s -w \
+            -ldflags "-s -w $gui \
               -X $B.Version=$VERSION \
               -X $B.Revision=$(git rev-parse --short HEAD) \
               -X $B.Branch=$branch \
@@ -202,9 +213,39 @@ jobs:
           set -euo pipefail
           bin=./goscape-singleplayer
           if [ "$RUNNER_OS" = Windows ]; then bin=./goscape-singleplayer.exe; fi
-          out=$("$bin" -version)
-          echo "$out"
-          echo "$out" | grep -q "embedded:  yes"
+          # Redirected to a file rather than captured into a variable. The
+          # Windows binary is linked -H windowsgui, so Windows gives it no
+          # console of its own and its standard handles are only the ones the
+          # shell hands over; a redirection is the form that unambiguously
+          # passes them in through STARTUPINFO. (A terminal launch works too —
+          # the binary attaches to the parent console — but that is the thing
+          # under test here, not something to depend on.) 2>&1 so a warning is
+          # part of the evidence.
+          "$bin" -version > version.txt 2>&1
+          cat version.txt
+          grep -q "embedded:  yes" version.txt
+
+      # The only automated check that the console window is actually gone:
+      # read the PE subsystem field straight out of the header. 2 is
+      # IMAGE_SUBSYSTEM_WINDOWS_GUI, 3 is _CUI, which is what a build that
+      # lost the -H flag would produce while still passing every other step.
+      # Offsets: e_lfanew is a uint32 at 0x3C; the subsystem is a uint16 at 68
+      # within the optional header, which starts 24 bytes after the PE
+      # signature (4-byte signature + 20-byte COFF header) — so 92 past
+      # e_lfanew, the same in PE32 and PE32+.
+      - name: Verify Windows links as a GUI app
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin=./goscape-singleplayer.exe
+          off=$(od -An -tu4 -j 60 -N 4 "$bin" | tr -d ' ')
+          sub=$(od -An -tu2 -j $((off + 92)) -N 2 "$bin" | tr -d ' ')
+          echo "PE subsystem: $sub"
+          if [ "$sub" != 2 ]; then
+            echo "expected 2 (WINDOWS_GUI); 3 means the -H windowsgui ldflag was lost" >&2
+            exit 1
+          fi
 
       - name: Archive (tar.gz)
         if: matrix.ext == 'tar.gz'

@@ -57,6 +57,17 @@ LDFLAGS = -s -w \
     -X $(BPREFIX).BuildUser=$(shell whoami)@$(shell hostname) \
     -X $(BPREFIX).BuildDate=$(BUILD_DATE)
 
+# Windows links as a GUI app so that double-clicking the exe opens the game
+# window and nothing else — a console-subsystem binary makes Windows allocate
+# and show a console window alongside it. The binary still writes to the
+# terminal it was started from, and falls back to a log file under --data-dir
+# when there is no terminal; cmd/goscape-singleplayer/console_windows.go has
+# the detail. `go env GOOS` rather than a hardcoded check so the flag follows a
+# cross-build too, and respects a GOOS already set in the environment.
+ifeq ($(shell go env GOOS),windows)
+GUI_LDFLAGS := -H windowsgui
+endif
+
 # Content provenance is stamped only into embedded builds: a plain `make
 # build` binary carries no content, so its -version output must not claim a
 # repo/branch/commit it doesn't have.
@@ -71,12 +82,12 @@ help: ## list targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-20s %s\n", $$1, $$2}'
 
 build: ## build without embedded content (the default; needs --cache-dir at runtime)
-	CGO_ENABLED=1 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) $(CMD)
+	CGO_ENABLED=1 go build -trimpath -ldflags "$(LDFLAGS) $(GUI_LDFLAGS)" -o $(BIN) $(CMD)
 
 build-embedded: ## build with the bundle in $(BUNDLE_DIR) embedded
 	@test -f $(MARKER) || { echo "no complete bundle at $(BUNDLE_DIR); run 'make embed-pack' first" >&2; exit 1; }
 	CGO_ENABLED=1 go build -trimpath -tags embedcache \
-	    -ldflags "$(LDFLAGS) $(CONTENT_LDFLAGS) -X $(CPREFIX).PackDigest=$$($(PACK_DIGEST_CMD))" -o $(BIN) $(CMD)
+	    -ldflags "$(LDFLAGS) $(CONTENT_LDFLAGS) $(GUI_LDFLAGS) -X $(CPREFIX).PackDigest=$$($(PACK_DIGEST_CMD))" -o $(BIN) $(CMD)
 
 embed-pack: ## pack the pinned Content revision into $(BUNDLE_DIR)
 	@test -n "$(CONTENT_COMMIT)" || { echo "content.lock: no commit pinned" >&2; exit 1; }
