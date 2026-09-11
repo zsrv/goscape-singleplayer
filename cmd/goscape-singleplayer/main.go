@@ -14,9 +14,18 @@
 //   - window creation panics (headless machine: glfw.Init, glfw.CreateWindow
 //     or gl.Init) → runWindow stops the server so sqlite closes cleanly, then
 //     lets the panic continue so the operator still sees why
+//
+// Windows output. The Windows build links as a GUI app (-H windowsgui), so
+// double-clicking it opens the game window and nothing else — no console
+// window alongside. Started from a terminal it still writes there, by
+// attaching to the console it was launched from. Started from Explorer it has
+// no standard streams at all, so the server log and any panic trace go to
+// <data-dir>/logs/goscape-singleplayer.log instead, and -console asks for a
+// console window as well. console_windows.go holds the detail.
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -24,6 +33,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +45,16 @@ import (
 	"github.com/zsrv/goscape-singleplayer/internal/content"
 	"github.com/zsrv/goscape-singleplayer/internal/inproc"
 	"github.com/zsrv/goscape-singleplayer/internal/server"
+)
+
+const (
+	// defaultDataDir is the -data-dir default, named because the fallback log
+	// has to be placed before the command line can be trusted — a usage error
+	// is one of the things it exists to record — and this is the only guess
+	// available at that point. Declared once so the two cannot drift.
+	defaultDataDir = "./data"
+
+	logFileName = "goscape-singleplayer.log"
 )
 
 func fatalf(format string, args ...any) {
@@ -58,6 +79,11 @@ type options struct {
 	lowMemory bool
 	members   bool
 
+	// console asks the Windows build for a console window. Declared on every
+	// platform so shortcuts, scripts and docs stay portable; inert everywhere
+	// else, which main reports rather than ignores.
+	console bool
+
 	// explicitCacheDir records whether -cache-dir was actually passed, which
 	// content.ResolveCacheDir needs to tell "user asked for this directory"
 	// apart from "nobody said, so the embedded bundle may win".
@@ -77,7 +103,7 @@ func parseArgs(args []string, out io.Writer) (opts *options, done bool, err erro
 	fs := flag.NewFlagSet("goscape-singleplayer", flag.ContinueOnError)
 	fs.SetOutput(out)
 
-	dataDir := fs.String("data-dir", "./data", "directory for the world database and player saves")
+	dataDir := fs.String("data-dir", defaultDataDir, "directory for the world database and player saves")
 	cacheDir := fs.String("cache-dir", "./data/pack", "packed game cache directory (goscape `make pack` output)")
 	wordencPath := fs.String("wordenc-path", "", "raw wordenc jagfile for the chat word-filter (default: <cache-dir>/../raw/wordenc)")
 	worldPort := fs.Int("world-port", 43594, "loopback game (world) TCP port")
@@ -88,6 +114,7 @@ func parseArgs(args []string, out io.Writer) (opts *options, done bool, err erro
 	mem := fs.String("mem", "high", "client memory mode: high|low")
 	worldType := fs.String("world-type", "members", "world type: free|members")
 	showVersion := fs.Bool("version", false, "print build and content provenance, then exit")
+	console := fs.Bool("console", false, "Windows only: also open a console window for log output when launched from Explorer (a console inherited from a terminal is always used, with or without this)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, false, err
@@ -108,6 +135,7 @@ func parseArgs(args []string, out io.Writer) (opts *options, done bool, err erro
 		loginPort:    *loginPort,
 		friendsPort:  *friendsPort,
 		exposeTCP:    *exposeTCP,
+		console:      *console,
 	}
 
 	switch *mem {
@@ -135,6 +163,30 @@ func parseArgs(args []string, out io.Writer) (opts *options, done bool, err erro
 	return o, false, nil
 }
 
+// wantsConsole reports whether args ask for a console window.
+//
+// The console has to exist before the first write, which is earlier than the
+// real parseArgs call can help with: the flag package reports usage errors to
+// its output, and on a windowsgui binary launched from Explorer that output
+// has nowhere to go yet. So the command line is parsed twice — here with the
+// output discarded, purely to learn the intent, and then for real.
+//
+// Reusing parseArgs rather than scanning os.Args is what keeps the two passes
+// from disagreeing about what the command line says: a hand-rolled scan has to
+// know which flags take a value to tell `-console` the flag from `-console`
+// the value of -cache-dir, and there is no reason to maintain that knowledge
+// twice. It holds only while parseArgs stays free of side effects other than
+// writing to out.
+//
+// -version short-circuits parseArgs before options exist, so `-console
+// -version` reports false. That combination has no use — an AllocConsole
+// window closes with the process — and every launch from a terminal has stdio
+// without the flag anyway.
+func wantsConsole(args []string) bool {
+	opts, _, _ := parseArgs(args, io.Discard)
+	return opts != nil && opts.console
+}
+
 // inertPortFlags names the port flags the user passed that cannot take effect
 // in the selected mode, in flag-declaration order.
 //
@@ -156,6 +208,47 @@ func inertPortFlags(o *options) []string {
 		}
 	}
 	return inert
+}
+
+// consoleFlagInert reports whether -console was passed on a platform where it
+// cannot do anything. Only the Windows build links as a GUI app, so only it
+// has a hidden console to show.
+//
+// goos is a parameter rather than a read of runtime.GOOS so the answer for
+// every platform is testable from any one of them.
+func consoleFlagInert(o *options, goos string) bool {
+	return o.console && goos != "windows"
+}
+
+// logFilePath is where output goes when there is no stream to write to.
+//
+// Under -data-dir rather than beside the executable: -data-dir is already the
+// one directory this command requires to be writable — the sqlite database and
+// the player saves live there — while the binary itself is often unpacked
+// somewhere read-only, or under Program Files where a write would be
+// virtualised somewhere the user will never find it.
+func logFilePath(dataDir string) string {
+	return filepath.Join(dataDir, "logs", logFileName)
+}
+
+// openLogFile creates the log directory and opens this run's log.
+//
+// It runs before server.Start has created any state directory, and on a first
+// launch -data-dir does not exist yet, so the directory is created here.
+//
+// O_TRUNC, not O_APPEND: the question this file answers is always "why did the
+// run I just did fail", so the previous run's bytes are noise, and a file
+// nobody ever looks at must not grow without bound.
+func openLogFile(dataDir string) (*os.File, error) {
+	path := logFilePath(dataDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("create log directory: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open log file: %w", err)
+	}
+	return f, nil
 }
 
 // ondemandBaseURL is the base URL both the readiness probe and the client's
@@ -200,12 +293,47 @@ func runWindow(launch func(), stop func()) {
 }
 
 func main() {
-	opts, done, err := parseArgs(os.Args[1:], os.Stdout)
+	// First, before anything writes anything: the Windows build is a GUI
+	// binary, which Windows starts with no standard handles unless something
+	// hands them over, and the flag package's usage errors are already a
+	// write. stdioUsable comes back false for exactly one launch shape — that
+	// binary started from Explorer without -console — and is always true
+	// elsewhere.
+	stdioUsable := setupConsole(wantsConsole(os.Args[1:]))
+
+	// Buffered rather than written straight out: -data-dir decides where
+	// output goes when stdio is unusable, and only parseArgs knows -data-dir.
+	// Without the buffer, usage text would be written before there was
+	// anywhere to put it.
+	var early bytes.Buffer
+	opts, done, err := parseArgs(os.Args[1:], &early)
+
+	// -version has nothing to log and nothing to start, so it must not create
+	// a log directory as a side effect of printing two lines.
+	if done {
+		_, _ = io.Copy(os.Stdout, &early)
+		return
+	}
+
+	if !stdioUsable {
+		// opts is nil when the command line did not parse, and the parse that
+		// would have said where -data-dir points is the one that failed — so
+		// use its default rather than drop the error on the floor. A Windows
+		// shortcut with a typo'd flag is otherwise a silent exit 1.
+		dataDir := defaultDataDir
+		if opts != nil {
+			dataDir = opts.dataDir
+		}
+		if f, logErr := openLogFile(dataDir); logErr == nil {
+			redirectStdio(f)
+		}
+		// Nothing to report if that failed: the report would need the stream
+		// it just failed to provide.
+	}
+	_, _ = io.Copy(os.Stdout, &early)
+
 	if err != nil {
 		fatalf("%v", err)
-	}
-	if done {
-		return
 	}
 
 	// Accepted-but-ignored flags are worth a word: without this, -login-port
@@ -214,6 +342,11 @@ func main() {
 		fmt.Fprintf(os.Stderr,
 			"warning: %s ignored: those modules run in-process, so nothing binds a port (pass --expose-tcp to bind them)\n",
 			strings.Join(inert, ", "))
+	}
+	if consoleFlagInert(opts, runtime.GOOS) {
+		fmt.Fprintf(os.Stderr,
+			"warning: -console ignored on %s: only the Windows build hides a console to begin with\n",
+			runtime.GOOS)
 	}
 
 	bundle, haveBundle := content.Bundle()
